@@ -211,11 +211,11 @@ paths. Anything else the agent writes is scratch: nothing after the run may rely
 runtime may keep it or throw it away. So a tau does not rely on its working directory either,
 which is up to the runtime.
 
-A run fails when the agent cannot run, when its paths do not fit (below), or when the agent ends
-it as failed: a runtime gives the agent a way to do that, with a reason, for when it cannot do
-what it was asked. Run as a command, without a person at the terminal, a runtime writes the
-agent's final message to stdout, and why a run failed to stderr, and exits with 0 only when the
-run succeeded.
+A run fails when the runtime cannot run the agent to the end, or when its paths do not fit
+(below). Whether the agent did what it was asked is not the runtime's to judge: a tau that needs
+to say so defines how, in its prompt and outputs. Run as a command, without a person at the
+terminal, a runtime writes the agent's final message to stdout, and why a run failed to stderr,
+and exits with 0 only when the run succeeded.
 
 ### Paths
 

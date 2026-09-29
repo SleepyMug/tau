@@ -31,7 +31,7 @@ const run = tau.bind(argv, { cwd: process.cwd(), env: process.env }, place);
 // Each input a file or a directory as declared, each output's directory there, and no path
 // inside another once symlinks are followed. Throws, listing every problem.
 checkInputs(run);
-// ... run the agent on run.prompt, with run.paths and run.env, and a way for it to fail ...
+// ... run the agent on run.prompt, with run.paths and run.env ...
 // After a successful run: each out and inout path as declared, where `locate` finds it; without
 // it, at the caller's path.
 checkOutputs(run, locate);
