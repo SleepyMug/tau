@@ -125,10 +125,10 @@ export declare function byTag(tag: Tag, signal?: AbortSignal): AsyncIterable<Not
 An API file is a TypeScript declaration file, and may declare whatever one can: functions, sync or
 async, overloaded or generic; classes, constants, namespaces, interfaces and types. Beyond what
 TypeScript asks of such a file, a tau asks only that it hold what the file imports:
-- **It type-checks.** The API files, and what they import, are checked together, with `strict` on,
-  imports resolved as Node.js resolves them (`"module": "NodeNext"`), and the ES2022 library and
-  the types of Node.js 24 (`@types/node`) as the environment, since the agent's programs run on
-  Node.js 24 or later. TypeScript must find no errors in them, and each API file is a module, so
+- **It type-checks.** The API files, and what they import, are checked together by TypeScript 6.0,
+  with `strict` on, imports resolved as Node.js resolves them (`"module": "NodeNext"`), and the
+  ES2022 library and the types of Node.js 24 (`@types/node`) as the environment, since the agent's
+  programs run on Node.js 24 or later. TypeScript must find no errors in them, and each API file is a module, so
   that programs can import it. A package's types that they import from a `node_modules/` are taken
   as they are, as `skipLibCheck` would.
 - **It is self-contained.** Every file the API files reach lies in the tau, apart from the ES library

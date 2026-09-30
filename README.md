@@ -49,7 +49,7 @@ for (const api of loadApis(agentDir)) {
 ```
 
 Apart from reading the tau and checking its paths, the library does no I/O: mounting, copying and
-running implementations are the runtime's job. It loads TypeScript 5.9 to check APIs, against
+running implementations are the runtime's job. It loads TypeScript 6.0 to check APIs, against
 Node.js 24's types, which it pins: `loadApis` takes about 0.4 s for a tau, and
 `checkImplementation` about 0.15 s.
 
