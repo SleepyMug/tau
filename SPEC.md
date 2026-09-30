@@ -8,6 +8,12 @@ socket. A tau may also ship modules: code that runs with the agent's own program
 such as pi-run executes the tau, binds its services to that socket, and presents them to the model
 in whatever way it chooses.
 
+This spec defines a **compiled format**: a tau as runtimes read and run it, as a built package is
+what gets installed, not the sources it is built from. That is why its links are limited (see
+[Directory](#directory)): a tau holds everything it uses, so a manifest or a module that two taus
+share is a copy in each. A source format, in which taus could share such parts and from which they
+would be built into this one, is a work in progress.
+
 ## Directory
 
 ```
