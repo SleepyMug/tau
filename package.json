@@ -1,16 +1,12 @@
 {
   "name": "@sleepymug/tau",
   "version": "0.1.0",
-  "description": "tau (Transportable Agent Unit): agents as directories that declare the services they need",
+  "description": "tau (Transportable Agent Unit): agents as directories that declare the APIs they need",
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./codec": {
-      "types": "./dist/codec.d.ts",
-      "import": "./dist/codec.js"
     }
   },
   "files": [
@@ -28,11 +24,8 @@
     "prepublishOnly": "pnpm build"
   },
   "packageManager": "pnpm@10.33.2",
-  "devDependencies": {
-    "@types/node": "^26.5.1"
-  },
   "dependencies": {
-    "ts-json-schema-generator": "2.9.0",
+    "@types/node": "^24.0.0",
     "typescript": "5.9.3"
   }
 }

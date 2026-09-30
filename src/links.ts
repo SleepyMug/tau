@@ -1,24 +1,19 @@
 import { type Dirent, lstatSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
-/** What a runtime reads of every tau; `copy` adds the rest. */
+/** What a runtime reads of a tau. */
 const READ = ["PROMPT.md", "tau.json", "skills", "api"];
-/** Where a runtime puts its services for modules, in place of what the tau has there. */
-const SERVICES = path.join("modules", "node_modules", "@svc");
 /** More links in a row than this is a loop; Linux gives up at 40 too. */
 const MAX_HOPS = 40;
 
 /**
- * The symlinks of what a runtime reads of the tau at `dir`, `copy` included, that break the spec:
- * each is relative, and leads, through any further symlinks, all relative, to something that
- * exists in the tau. One in what the tau copies leads into what it copies, except under
- * modules/node_modules/@svc/, which the runtime replaces. A symlink to a directory is followed,
- * and what it leads to is checked the same way. One problem per symlink.
+ * The symlinks of what a runtime reads of the tau at `dir` that break the spec: each is relative,
+ * and leads, through any further symlinks, all relative, to something that exists in the tau. A
+ * symlink to a directory is followed, and what it leads to is checked the same way. One problem
+ * per symlink.
  */
-export function linkProblems(dir: string, copy: readonly string[]): string[] {
+export function linkProblems(dir: string): string[] {
 	const root = realpathSync(dir);
-	const copied = copy.map((entry) => path.join(root, entry));
-	const services = path.join(root, SERVICES);
 	const relative = (file: string): string => path.relative(root, file) || ".";
 	const problems: string[] = [];
 	const walked = new Set<string>();
@@ -63,16 +58,13 @@ export function linkProblems(dir: string, copy: readonly string[]): string[] {
 				const stats = lstatSync(file);
 				[isLink, isDir] = [stats.isSymbolicLink(), stats.isDirectory()];
 			} catch {
-				// A part the tau does not have; the listed paths are checked for existence elsewhere.
+				// A part the tau does not have.
 				return;
 			}
 		} else [isLink, isDir] = [entry.isSymbolicLink(), entry.isDirectory()];
 		if (isLink) {
 			const end = follow(file);
-			if (end === undefined) return;
-			if (isCopied(file) && !inside(file, services) && !isCopied(end))
-				problems.push(`${relative(file)}: leads to ${relative(end)}, which the tau does not copy`);
-			else if (statSync(end).isDirectory()) walk(end);
+			if (end !== undefined && statSync(end).isDirectory()) walk(end);
 		} else if (isDir) walk(file);
 	};
 	const walk = (directory: string): void => {
@@ -80,9 +72,8 @@ export function linkProblems(dir: string, copy: readonly string[]): string[] {
 		walked.add(directory);
 		for (const entry of readdirSync(directory, { withFileTypes: true })) visit(path.join(directory, entry.name), entry);
 	};
-	const isCopied = (file: string): boolean => copied.some((listed) => inside(file, listed));
 
-	for (const part of [...READ, ...copy]) visit(path.join(root, part));
+	for (const part of READ) visit(path.join(root, part));
 	return problems;
 }
 

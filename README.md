@@ -1,22 +1,21 @@
 # tau
 
 **tau** (Transportable Agent Unit) packages an agent as a directory. The directory holds a prompt,
-skills, and, in `api/`, TypeScript manifests of the external services the agent needs, but never
-their implementations. Whoever runs a tau serves its services on one Unix socket, and a runtime
-such as pi-run binds them for the agent. A tau may also ship modules: packages that run with the
-agent's own programs, and may wrap its services. Its `tau.json` declares what it takes and gives:
-arguments, environment variables, and the files and directories it reads and writes; and what a
-runtime copies for the agent's programs. How they reach the agent is up to the runtime.
+skills, and, in `api/`, TypeScript declarations of the APIs the agent needs, but never their
+implementations. A runtime such as pi-run provides an implementation of each API, which programs
+import as `@api/<name>`; how it runs, in the program's process or behind a boundary that keeps
+credentials from the agent, is the runtime's business. Its `tau.json` declares what it takes and
+gives: arguments, environment variables, and the files and directories it reads and writes. How
+they reach the agent is up to the runtime.
 
-- [SPEC.md](SPEC.md) specifies the directory, the metadata, the service manifests, the modules,
-  what every runtime keeps to, and the socket protocol.
-- This package, `@sleepymug/tau`, reads and checks a tau's metadata, services and modules for
-  runtimes written in TypeScript.
+- [SPEC.md](SPEC.md) specifies the directory, the metadata, the APIs, their implementations, and
+  what every runtime keeps to.
+- This package, `@sleepymug/tau`, reads and checks a tau for runtimes written in TypeScript.
 
 ## Library
 
 ```ts
-import { checkInputs, checkModule, checkOutputs, loadModules, loadServices, loadTau, TAU_SOCKET } from "@sleepymug/tau";
+import { checkImplementation, checkInputs, checkOutputs, loadApis, loadTau } from "@sleepymug/tau";
 
 // PROMPT.md and tau.json. A tau.json that breaks the spec, or a prompt naming an undeclared
 // argument, throws, naming its file and the reason; so do symlinks that break the spec.
@@ -37,48 +36,22 @@ checkInputs(run);
 // it, at the caller's path.
 checkOutputs(run, locate);
 
-// Every api/<name>.d.ts of the tau, translated to JSON Schema and verified. A manifest that
-// cannot be translated without changing its meaning throws, naming its file and the reason.
-const services = loadServices(agentDir);
-for (const service of services) {
-	service.declarations; // the manifest as written: what `@svc/<name>` declares
-	// Each call is checked, and reduced to what the manifest declares. On the wire, bytes are
-	// base64; programs and providers hold them as a Uint8Array. A relay keeps the wire form:
-	const args = service.checkArguments("addNote", ["buy milk"]);
-	const result = service.checkResult("addNote", response); // null for a function without a result
-	// A provider takes arguments from the wire, and answers for it:
-	service.decodeArguments("addNote", wireArgs);
-	service.encodeResult("addNote", note);
-	// A program's binding does the reverse:
-	service.encodeArguments("addNote", ["buy milk"]);
-	service.decodeResult("addNote", wireResult);
-	// All of it from the canonical schema alone, as JSON, in a process that does not load
-	// TypeScript: serviceCodec(service.schema), from "@sleepymug/tau/codec".
+// Every api/<name>.d.ts of the tau, once TypeScript finds them and what they import free of
+// errors, and inside the tau. Throws, listing every problem.
+for (const api of loadApis(agentDir)) {
+	api.specifier; // "@api/notes": what programs import
+	api.file; // what types it, with its imports resolving from there
+	api.description; // its @packageDocumentation
+	// Before linking an implementation: TypeScript must find its module assignable to the API's,
+	// reading the declarations beside it. Throws, with TypeScript's reasons.
+	checkImplementation(api, "/path/to/notes-implementation/index.js");
 }
-
-// Every modules/<dir>/ of the tau: typed packages, named by their package.json.
-for (const module of loadModules(tau)) {
-	// Throws, listing every import from the module's entry points that does not resolve to what
-	// the tau copies, or names a service api/ does not declare.
-	checkModule(module, tau);
-}
-// Then copy each of `tau.copy`, keeping symlinks as they are; put each service's binding at
-// modules/node_modules/@svc/<name> in the copy; and make each module importable by its name from
-// there, e.g. with ts-executor's packageModule.
 ```
 
 Apart from reading the tau and checking its paths, the library does no I/O: mounting, copying and
-talking to the socket are the runtime's job. It loads TypeScript 5.9 and ts-json-schema-generator to read manifests, which takes about
-0.2 s per manifest.
-
-The code is adapted from fyona at commit 008a6f5, and must stay in step with it until fyona uses
-this package:
-- `src/schema/` is copied from `fbox-host`;
-- `src/read-manifest.ts` and `src/verify.ts` are adapted from `fbox-derive`.
-
-Bytes are tau's own, and fyona does not have them yet: `contentEncoding` in the subset and the
-check of unions that bytes would make ambiguous (`service-schema.ts`), the two forms of a value
-(`validate.ts`, `bytes.ts`), and `Uint8Array` in the translation and the printed declarations.
+running implementations are the runtime's job. It loads TypeScript 5.9 to check APIs, against
+Node.js 24's types, which it pins: `loadApis` takes about 0.4 s for a tau, and
+`checkImplementation` about 0.15 s.
 
 ## Commands
 

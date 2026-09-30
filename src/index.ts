@@ -1,7 +1,4 @@
-export { type Codec, serviceCodec } from "./codec.js";
-export { loadService, loadServices, type Service, TAU_SOCKET } from "./manifest.js";
-export { checkModule, loadModule, loadModules, type Module } from "./modules.js";
-export type { JsonSchema, JsonValue, ServiceSchema, Value } from "./schema/service-schema.js";
+export { API_SCOPE, type Api, checkImplementation, loadApis } from "./api.js";
 export {
 	type Arg,
 	type BoundPath,
