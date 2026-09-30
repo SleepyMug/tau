@@ -3,14 +3,15 @@ import {
 	type CanonicalFunction,
 	type CanonicalService,
 	IDENTIFIER,
+	isBytesNode,
 	REF_PREFIX,
 	type SchemaNode,
 } from "./service-schema.js";
 
 /**
  * Prints a canonical service as the TypeScript declarations programs in the box are checked
- * against: named types become `export interface`/`export type`, functions return Promises, and
- * descriptions become JSDoc. Every value the host's validation accepts has the printed type;
+ * against: named types become `export interface`/`export type`, functions return Promises, bytes
+ * are `Uint8Array`, and descriptions become JSDoc. Every value the host's validation accepts has the printed type;
  * constraints TypeScript cannot express (integers, bounds, lengths, patterns) are validated and
  * appear as JSDoc tags: on properties and named types, and in `@param`/`@returns`.
  */
@@ -75,6 +76,7 @@ function typeOf(schema: SchemaNode, indent: string): string {
 	if (schema.enum !== undefined) return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
 	switch (schema.type) {
 		case "string":
+			return isBytesNode(schema) ? "Uint8Array" : "string";
 		case "boolean":
 		case "null":
 			return schema.type;

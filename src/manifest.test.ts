@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { loadService, loadServices } from "./index.js";
+import { loadService, loadServices, serviceCodec } from "./index.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-test-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -133,4 +133,111 @@ test("results are checked, and reduced to what the manifest declares", () => {
 	);
 	// A function without a result answers null, whatever the provider sent.
 	assert.equal(service.checkResult("forget", "ignored"), null);
+});
+
+const FILES = `/** Files kept as bytes. @packageDocumentation */
+
+export interface File {
+	name: string;
+	/** What the file holds. */
+	data: Uint8Array;
+}
+
+export type Chunk = { kind: "text"; text: string } | { kind: "bytes"; data: Uint8Array };
+
+export declare function put(file: File, chunks?: Chunk[]): Promise<Uint8Array>;
+
+export declare function sizes(files: Record<string, Uint8Array>): Promise<Uint8Array | null>;
+
+export declare function note(meta: Record<string, unknown>): Promise<number>;
+`;
+
+const files = () => loadService(write("agent/api/files.d.ts", FILES));
+
+test("Uint8Array is bytes: base64 on the wire, a Uint8Array in programs and providers", () => {
+	const service = files();
+	const wire = [
+		{ name: "a", data: "aGk=" },
+		[
+			{ kind: "bytes", data: "AAE=" },
+			{ kind: "text", text: "AAE=" },
+		],
+	];
+	// What a provider takes: bytes where the manifest has them, text elsewhere.
+	const taken = [
+		{ name: "a", data: new Uint8Array([104, 105]) },
+		[
+			{ kind: "bytes", data: new Uint8Array([0, 1]) },
+			{ kind: "text", text: "AAE=" },
+		],
+	];
+	assert.deepEqual(service.decodeArguments("put", wire), taken);
+	// A program's arguments go out as the provider will read them.
+	assert.deepEqual(service.encodeArguments("put", taken), wire);
+	// A relay keeps the wire form.
+	assert.deepEqual(service.checkArguments("put", wire), wire);
+	assert.equal(service.encodeResult("put", new Uint8Array([104, 105])), "aGk=");
+	assert.deepEqual(service.decodeResult("put", "aGk="), new Uint8Array([104, 105]));
+	assert.deepEqual(service.decodeArguments("sizes", [{ empty: "" }]), [{ empty: new Uint8Array() }]);
+	assert.equal(service.decodeResult("sizes", null), null);
+	// A Buffer is a Uint8Array.
+	assert.equal(service.encodeResult("sizes", Buffer.from("hi")), "aGk=");
+});
+
+test("bytes are checked in either form, and go only where the manifest has them", () => {
+	const service = files();
+	assert.throws(
+		() => service.checkArguments("put", [{ name: "a", data: "aGk" }]),
+		/^TypeError: files\.put: file\/data: must be bytes, as a base64 string/,
+	);
+	assert.throws(() => service.decodeArguments("put", [{ name: "a", data: 7 }]), /files\.put: file\/data: must be bytes/);
+	assert.throws(
+		() => service.encodeArguments("put", [{ name: "a", data: "aGk=" }]),
+		/files\.put: file\/data: must be bytes, a Uint8Array/,
+	);
+	assert.throws(
+		() => service.encodeArguments("put", [{ name: new Uint8Array(), data: new Uint8Array() }]),
+		/files\.put: file\/name: must be string, not bytes/,
+	);
+	assert.throws(() => service.encodeResult("put", "aGk="), /the result does not match the manifest: result: must be bytes/);
+	// Where the manifest allows anything, a value must still be what JSON carries.
+	assert.throws(
+		() => service.encodeArguments("note", [{ raw: new Uint8Array() }]),
+		/files\.note: meta\/raw: must not be bytes: the manifest declares no Uint8Array here/,
+	);
+	assert.throws(() => service.encodeArguments("note", [{ at: new Date() } as never]), /meta\/at: must be JSON/);
+	assert.throws(() => service.encodeResult("note", Number.NaN), /result: must be a finite number/);
+	const loop: Record<string, unknown> = {};
+	loop.self = loop;
+	assert.throws(() => service.encodeArguments("note", [loop as never]), /meta\/self: must not contain itself/);
+});
+
+test("a manifest in which one string could be bytes or text is refused", () => {
+	const refused: [string, string, RegExp][] = [
+		["mixed", "export function f(a: string | Uint8Array): Promise<void>;", /mixed\.f\(a\) is a union that one string could match as bytes/],
+		["overlap", "export function f(a: { data: string } | { data: Uint8Array }): Promise<void>;", /overlap\.f\(a\) is a union/],
+		["loose", "export function f(): Promise<{ data: Uint8Array } | Record<string, unknown>>;", /loose\.f: its result is a union/],
+		["own", "export interface Uint8Array { length: number }\nexport function f(a: Uint8Array): Promise<void>;", /Uint8Array: is the global Uint8Array/],
+		["buffer", "export function f(a: Uint8Array<ArrayBuffer>): Promise<void>;", /f: its parameters cannot be carried as JSON without changing/],
+	];
+	for (const [name, text, reason] of refused) {
+		assert.throws(() => loadService(write(`${name}.d.ts`, text)), reason, name);
+	}
+	// Members no value can match both of are fine, however they hold bytes.
+	const told = loadService(
+		write("told.d.ts", "export function f(a: Uint8Array | null | number, b: { kind: 1; v: Uint8Array } | { kind: 2; v: string }): Promise<void>;\n"),
+	);
+	assert.deepEqual(told.decodeArguments("f", [null, { kind: 2, v: "AA==" }]), [null, { kind: 2, v: "AA==" }]);
+	assert.deepEqual(told.decodeArguments("f", ["AA==", { kind: 1, v: "AA==" }]), [new Uint8Array([0]), { kind: 1, v: new Uint8Array([0]) }]);
+});
+
+test("a codec made from a service's schema, as JSON, handles calls as the service does", () => {
+	const service = files();
+	const codec = serviceCodec(JSON.parse(JSON.stringify(service.schema)));
+	assert.deepEqual(codec.schema, service.schema);
+	assert.deepEqual(codec.functions, service.functions);
+	assert.equal(codec.description, "Files kept as bytes.");
+	const args = [{ name: "a", data: new Uint8Array([1, 2, 3]) }];
+	assert.deepEqual(codec.encodeArguments("put", args), service.encodeArguments("put", args));
+	assert.deepEqual(codec.decodeResult("put", "AQID"), new Uint8Array([1, 2, 3]));
 });

@@ -139,25 +139,34 @@ export declare function addNote(text: string, tags?: string[]): Promise<Note>;
   result, or `void` for a function without one. Any other return type is refused, including `T`
   or `void` alone, `PromiseLike<T>`, `globalThis.Promise<T>`, an alias of `Promise`, and a `T`
   that is itself a `Promise`.
-- **Types:** a manifest may declare interfaces and type aliases, except one named `Promise`.
-  Nothing else is allowed, including imports, values, classes and enums, so a manifest is
-  self-contained.
+- **Types:** a manifest may declare interfaces and type aliases, except ones named `Promise` or
+  `Uint8Array`. Nothing else is allowed, including imports, values, classes and enums, so a
+  manifest is self-contained.
 - **Documentation:** TSDoc. The first doc comment, if it has `@packageDocumentation`, describes the
   service. A declaration's doc comment describes it, and `@param name - text` describes a
   parameter.
-- **What JSON can carry:** every parameter and result travels as JSON, so its type must mean the
-  same after the trip. A manifest is refused, with the reason, when it cannot be translated to JSON
-  Schema without changing its meaning. That includes:
+- **What a call can carry:** every parameter and result travels as JSON (see [Calls](#calls)), so
+  its type must mean the same after the trip: JSON's values, and bytes. A manifest is refused, with
+  the reason, when it cannot be translated to JSON Schema without changing its meaning. That
+  includes:
   - `Date`, `Map`, `Set`, `bigint`, functions and class instances;
   - `T | undefined` (an optional property `p?: T` is fine);
   - generic and overloaded functions, rest and destructured parameters;
   - `any`, `readonly`, and TypeScript `enum` (use a union of string literals).
+- **Bytes:** `Uint8Array` is bytes. It may stand wherever a type may: a parameter, a result, a
+  property, the items of an array, the values of a record, a member of a union. Programs and
+  providers hold bytes as a `Uint8Array`; on the wire they are base64. A union is refused when one
+  string could be bytes in one of its members and text in the same place of another, as in
+  `string | Uint8Array`, or `{ data: string } | { data: Uint8Array }`: the runtime could not tell
+  which to hand over. `{ kind: "text"; data: string } | { kind: "bytes"; data: Uint8Array }` is
+  fine, since `kind` tells them apart.
 
 The check is mechanical: the manifest is translated to a small subset of JSON Schema (see the
-header of [src/schema/service-schema.ts](src/schema/service-schema.ts)). That schema is printed
-back as TypeScript, and `tsc` must find each function's parameters and return type identical to
-the manifest's. The JSON Schema is what runtimes validate calls against. The printed declarations
-serve only this check: `@svc/<name>` is typed by the manifest as written.
+header of [src/schema/service-schema.ts](src/schema/service-schema.ts)), in which bytes are
+`{ "type": "string", "contentEncoding": "base64" }`. That schema is printed back as TypeScript, and
+`tsc` must find each function's parameters and return type identical to the manifest's. The JSON
+Schema is what runtimes validate calls against. The printed declarations serve only this check:
+`@svc/<name>` is typed by the manifest as written.
 
 ### Modules
 
@@ -222,6 +231,10 @@ or
 - **`args`** are positional, in the order of `params`. Trailing optional arguments may be left out.
 - **`result`** is required in a success response. A function that returns `Promise<void>` answers
   `{"result":null}`.
+- **Bytes:** where the manifest declares a `Uint8Array`, the value is a JSON string of base64
+  (RFC 4648 §4: the standard alphabet, padded). The runtime and the provider convert it from and to
+  a `Uint8Array` where the manifest declares one, and nowhere else, so neither a program nor a
+  provider sees base64.
 - **Cancellation:** if the runtime closes its side before the response arrives, the call is
   cancelled, and the provider should stop the work. The runtime does not half-close while waiting.
 - **Failure:** a connection that closes before a complete response line is a failed call.

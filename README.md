@@ -42,10 +42,18 @@ checkOutputs(run, locate);
 const services = loadServices(agentDir);
 for (const service of services) {
 	service.declarations; // the manifest as written: what `@svc/<name>` declares
-	// What to send the provider: validated, and reduced to what the manifest declares.
+	// Each call is checked, and reduced to what the manifest declares. On the wire, bytes are
+	// base64; programs and providers hold them as a Uint8Array. A relay keeps the wire form:
 	const args = service.checkArguments("addNote", ["buy milk"]);
-	// The same for what came back; null for a function without a result.
-	const result = service.checkResult("addNote", response);
+	const result = service.checkResult("addNote", response); // null for a function without a result
+	// A provider takes arguments from the wire, and answers for it:
+	service.decodeArguments("addNote", wireArgs);
+	service.encodeResult("addNote", note);
+	// A program's binding does the reverse:
+	service.encodeArguments("addNote", ["buy milk"]);
+	service.decodeResult("addNote", wireResult);
+	// All of it from the canonical schema alone, as JSON, in a process that does not load
+	// TypeScript: serviceCodec(service.schema), from "@sleepymug/tau/codec".
 }
 
 // Every modules/<dir>/ of the tau: typed packages, named by their package.json.
@@ -67,6 +75,10 @@ The code is adapted from fyona at commit 008a6f5, and must stay in step with it 
 this package:
 - `src/schema/` is copied from `fbox-host`;
 - `src/read-manifest.ts` and `src/verify.ts` are adapted from `fbox-derive`.
+
+Bytes are tau's own, and fyona does not have them yet: `contentEncoding` in the subset and the
+check of unions that bytes would make ambiguous (`service-schema.ts`), the two forms of a value
+(`validate.ts`, `bytes.ts`), and `Uint8Array` in the translation and the printed declarations.
 
 ## Commands
 

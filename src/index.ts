@@ -1,6 +1,7 @@
+export { type Codec, serviceCodec } from "./codec.js";
 export { loadService, loadServices, type Service, TAU_SOCKET } from "./manifest.js";
 export { checkModule, loadModule, loadModules, type Module } from "./modules.js";
-export type { JsonValue } from "./schema/service-schema.js";
+export type { JsonSchema, JsonValue, ServiceSchema, Value } from "./schema/service-schema.js";
 export {
 	type Arg,
 	type BoundPath,

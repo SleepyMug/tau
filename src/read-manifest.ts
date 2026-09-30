@@ -1,11 +1,15 @@
 // Adapted from fyona packages/fbox-derive/src/read-declarations.ts at commit 008a6f5.
 import path from "node:path";
 import {
+	AnnotatedType,
+	type BaseType,
 	type CompletedConfig,
 	createFormatter,
 	createParser,
 	DEFAULT_CONFIG,
 	SchemaGenerator,
+	StringType,
+	type SubNodeParser,
 } from "ts-json-schema-generator";
 import ts from "typescript";
 import type { FunctionSchema, JsonSchema, JsonValue, ParamSchema } from "./schema/service-schema.js";
@@ -13,10 +17,31 @@ import type { FunctionSchema, JsonSchema, JsonValue, ParamSchema } from "./schem
 /**
  * Reads a service manifest, `api/<name>.d.ts`: its exported functions become the service's
  * functions, and each parameter and result type is turned into JSON Schema, collecting every named
- * type they reach as `$defs`. Translating types is ts-json-schema-generator's job; it is silently
- * lossy (`Date` becomes a string), so nothing read here is trusted until verify.ts has compared
- * the printed declarations with the manifest.
+ * type they reach as `$defs`. Translating types is ts-json-schema-generator's job, with bytes
+ * (`Uint8Array`) added here; it is silently lossy (`Date` becomes a string), so nothing read here
+ * is trusted until verify.ts has compared the printed declarations with the manifest.
  */
+
+/** Global types the translation relies on, which a manifest may not declare its own of. */
+const GLOBAL_TYPES: Readonly<Record<string, string>> = {
+	Promise: "is the global Promise, and a manifest may not declare its own",
+	Uint8Array: "is the global Uint8Array, bytes, and a manifest may not declare its own",
+};
+
+/**
+ * `Uint8Array` is bytes: a base64 string on the wire, marked by `contentEncoding`. It prints back
+ * as `Uint8Array`, so the identity check refuses a use that is not the plain type, such as
+ * `Uint8Array<ArrayBuffer>`; the manifest cannot declare a type of that name (GLOBAL_TYPES).
+ */
+class BytesNodeParser implements SubNodeParser {
+	supportsNode(node: ts.Node): boolean {
+		return ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) && node.typeName.text === "Uint8Array";
+	}
+
+	createType(): BaseType {
+		return new AnnotatedType(new StringType(), { contentEncoding: "base64" }, false);
+	}
+}
 
 export const COMPILER_OPTIONS: ts.CompilerOptions = {
 	target: ts.ScriptTarget.ES2022,
@@ -130,8 +155,8 @@ export function readManifest(file: string, text: string): ReadManifest {
 	const names: string[] = [];
 	for (const statement of source.statements) {
 		if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) {
-			if (statement.name.text === "Promise")
-				reject("Promise:", "is the global Promise, and a manifest may not declare its own");
+			const name = statement.name.text;
+			if (Object.hasOwn(GLOBAL_TYPES, name)) reject(`${name}:`, GLOBAL_TYPES[name] as string);
 			continue;
 		}
 		if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
@@ -157,7 +182,8 @@ export function readManifest(file: string, text: string): ReadManifest {
 	const exports = new Map(checker.getExportsOfModule(moduleSymbol).map((symbol) => [symbol.name, symbol]));
 	const generator = new SchemaGenerator(
 		program,
-		createParser(program, GENERATOR),
+		// Augmented parsers come before the generator's own.
+		createParser(program, GENERATOR, (parser) => parser.addNodeParser(new BytesNodeParser())),
 		createFormatter(GENERATOR),
 		GENERATOR,
 	);

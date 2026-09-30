@@ -12,7 +12,8 @@
  * - `{ type, const?, enum? }` with `type` one of string, number, integer, boolean, null, object,
  *   array, or `const`/`enum` alone (primitive values only);
  * - the constraints of each type:
- *   - string: minLength, maxLength, pattern;
+ *   - string: minLength, maxLength, pattern; or `contentEncoding: "base64"` alone, which makes it
+ *     bytes, a `Uint8Array` in the declarations (tau's own; not in fyona);
  *   - number and integer: minimum, maximum, exclusiveMinimum, exclusiveMaximum;
  *   - array: items, or a closed tuple (prefixItems), plus minItems, maxItems;
  *   - object: properties, required, additionalProperties;
@@ -21,10 +22,14 @@
  * Rewritten on the way in: the draft-07 forms TypeBox and ts-json-schema-generator emit for
  * tuples (`items: [...]`) and records (`patternProperties: { "^.*$": T }`), `type` lists, and
  * nested or single-member `anyOf`. Refused: a named type that refers to itself without an object
- * or array in between (`type X = X | string`), which TypeScript cannot declare.
+ * or array in between (`type X = X | string`), which TypeScript cannot declare; and a union that
+ * one string could match as bytes in one member and as text in the same place of another.
  */
 
 export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+/** What a call carries as programs and providers hold it: JSON, with bytes as a `Uint8Array`. */
+export type Value = null | boolean | number | string | Uint8Array | readonly Value[] | { readonly [key: string]: Value };
 
 /** One schema node, as plain JSON: what a service is written in. */
 export type JsonSchema = { readonly [keyword: string]: JsonValue };
@@ -64,6 +69,8 @@ export interface SchemaNode {
 	readonly minLength?: number;
 	readonly maxLength?: number;
 	readonly pattern?: string;
+	/** On a string, alone: the string is bytes in base64. */
+	readonly contentEncoding?: "base64";
 	readonly minimum?: number;
 	readonly maximum?: number;
 	readonly exclusiveMinimum?: number;
@@ -115,14 +122,17 @@ const RESERVED_WORDS = new Set(
 		"private protected public return static super switch this throw true try typeof var void while with yield"
 	).split(" "),
 );
-/** Names TypeScript refuses for an interface or type alias, and `Promise`, which the declarations use. */
+/**
+ * Names TypeScript refuses for an interface or type alias, and `Promise` and `Uint8Array`, which
+ * the declarations use.
+ */
 const RESERVED_TYPE_NAMES = new Set(
-	"any unknown never string number boolean symbol bigint object undefined keyof infer unique readonly intrinsic as Promise".split(
+	"any unknown never string number boolean symbol bigint object undefined keyof infer unique readonly intrinsic as Promise Uint8Array".split(
 		" ",
 	),
 );
 const TYPE_KEYWORDS: Readonly<Record<NonNullable<SchemaNode["type"]>, readonly string[]>> = {
-	string: ["minLength", "maxLength", "pattern"],
+	string: ["minLength", "maxLength", "pattern", "contentEncoding"],
 	number: ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
 	integer: ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
 	boolean: [],
@@ -146,6 +156,7 @@ const KEYWORDS = [
 	"minLength",
 	"maxLength",
 	"pattern",
+	"contentEncoding",
 	"minimum",
 	"maximum",
 	"exclusiveMinimum",
@@ -234,10 +245,16 @@ export function matchesType(value: JsonValue, type: SchemaType): boolean {
 		case "array":
 			return Array.isArray(value);
 		case "object":
-			return isObject(value);
+			// Bytes are no object, though a Uint8Array is one to JavaScript.
+			return isObject(value) && !ArrayBuffer.isView(value);
 		default:
 			return typeof value === type;
 	}
+}
+
+/** Whether a node is bytes: a string in base64. */
+export function isBytesNode(node: SchemaNode): boolean {
+	return node.type === "string" && node.contentEncoding === "base64";
 }
 
 function primitive(value: JsonValue, type: SchemaType | undefined, path: string): Primitive {
@@ -388,6 +405,15 @@ function typeList(
 }
 
 function canonicalString(node: RawSchema, out: Mutable<SchemaNode>, path: string): void {
+	if (node.contentEncoding !== undefined) {
+		if (node.contentEncoding !== "base64") fail(`${path}.contentEncoding`, 'must be "base64", which makes the string bytes');
+		// The constraints would count and match base64 characters, not bytes.
+		for (const key of ["minLength", "maxLength", "pattern", "const", "enum"] as const) {
+			if (node[key] !== undefined) fail(path, `has ${key}, which bytes do not take`);
+		}
+		out.contentEncoding = "base64";
+		return;
+	}
 	const minLength = nonNegativeInteger(node.minLength, `${path}.minLength`);
 	const maxLength = nonNegativeInteger(node.maxLength, `${path}.maxLength`);
 	if (minLength !== undefined) out.minLength = minLength;
@@ -486,6 +512,150 @@ function assertNoBareCycles(service: string, defs: ReadonlyMap<string, SchemaNod
 	for (const name of defs.keys()) visit(name, []);
 }
 
+/**
+ * Refuse a union that one string could match as bytes in one member and as text in the same place
+ * of another (`string | Uint8Array`, `{ data: string } | { data: Uint8Array }`). On the wire both
+ * are strings, and a runtime converts base64 to bytes by the member a value matches, so such a
+ * value would reach the other side as bytes or as text by chance. Members that no value can match
+ * both of, told apart by a type, a literal or a required property, are fine. Conservative: a union
+ * whose members might overlap is refused even when no actual value would be read both ways.
+ */
+function assertUnambiguousBytes(
+	service: string,
+	defs: ReadonlyMap<string, SchemaNode>,
+	functions: ReadonlyMap<string, CanonicalFunction>,
+): void {
+	const resolve = (node: SchemaNode): SchemaNode => {
+		let resolved = node;
+		while (resolved.$ref !== undefined) resolved = defs.get(resolved.$ref.slice(REF_PREFIX.length)) as SchemaNode;
+		return resolved;
+	};
+	const isAny = (node: SchemaNode): boolean =>
+		node.type === undefined && node.anyOf === undefined && node.const === undefined && node.enum === undefined;
+	const literals = (node: SchemaNode): readonly Primitive[] | undefined =>
+		node.const !== undefined ? [node.const] : node.enum;
+	/** What an object keeps under `key`: its declared property, its record type, or anything; undefined when it drops or refuses the key. */
+	const kept = (node: SchemaNode, key: string | undefined): SchemaNode | undefined => {
+		const properties = node.properties ?? {};
+		if (key !== undefined && Object.hasOwn(properties, key)) return properties[key];
+		const additional = node.additionalProperties;
+		if (typeof additional === "object") return additional;
+		return additional !== false && Object.keys(properties).length === 0 ? {} : undefined;
+	};
+	const takesText = (schema: SchemaNode): boolean => {
+		const node = resolve(schema);
+		if (node.anyOf !== undefined) return node.anyOf.some(takesText);
+		if (isBytesNode(node)) return false;
+		const values = literals(node);
+		if (values !== undefined) return values.some((value) => typeof value === "string");
+		return node.type === undefined || node.type === "string";
+	};
+	const holdsBytes = (schema: SchemaNode, seen = new Set<SchemaNode>()): boolean => {
+		const node = resolve(schema);
+		if (seen.has(node)) return false;
+		seen.add(node);
+		if (isBytesNode(node)) return true;
+		return nodeChildren(node).some((child) => holdsBytes(child, seen));
+	};
+	/** Whether no value can match both; false when unsure. */
+	const disjoint = (x: SchemaNode, y: SchemaNode, depth = 0): boolean => {
+		const a = resolve(x);
+		const b = resolve(y);
+		if (depth > 16) return false;
+		if (a.anyOf !== undefined) return a.anyOf.every((member) => disjoint(member, b, depth + 1));
+		if (b.anyOf !== undefined) return b.anyOf.every((member) => disjoint(a, member, depth + 1));
+		if (isAny(a) || isAny(b)) return false;
+		const la = literals(a);
+		const lb = literals(b);
+		if (la !== undefined && lb !== undefined) return !la.some((value) => lb.includes(value));
+		if (la !== undefined && b.type !== undefined) return !la.some((value) => matchesType(value, b.type as SchemaType));
+		if (lb !== undefined && a.type !== undefined) return !lb.some((value) => matchesType(value, a.type as SchemaType));
+		const numbers = ["number", "integer"];
+		if (a.type !== b.type && !(numbers.includes(a.type as string) && numbers.includes(b.type as string))) return true;
+		if (a.type !== "object") return false;
+		// A key one requires, the other checks: against its property or its record type, or refuses it.
+		for (const [one, other] of [
+			[a, b],
+			[b, a],
+		] as const) {
+			for (const key of one.required ?? []) {
+				const own = one.properties?.[key] ?? {};
+				const additional = other.additionalProperties;
+				const check = other.properties?.[key] ?? (typeof additional === "object" ? additional : additional);
+				if (check === false) return true;
+				if (typeof check === "object" && disjoint(own, check, depth + 1)) return true;
+			}
+		}
+		return false;
+	};
+	/** Pairs already compared, or being compared: a recursive type compares a pair once. */
+	const compared = new Map<SchemaNode, Set<SchemaNode>>();
+	/** Whether a value could match both, reading a string as bytes in one and as text in the other. */
+	const confusable = (x: SchemaNode, y: SchemaNode): boolean => {
+		const a = resolve(x);
+		const b = resolve(y);
+		const pairs = compared.get(a) ?? new Set<SchemaNode>();
+		if (pairs.has(b)) return false;
+		pairs.add(b);
+		compared.set(a, pairs);
+		if (a.anyOf !== undefined) return a.anyOf.some((member) => confusable(member, b));
+		if (b.anyOf !== undefined) return b.anyOf.some((member) => confusable(a, member));
+		if (disjoint(a, b)) return false;
+		if (isBytesNode(a) || isBytesNode(b)) return isBytesNode(a) ? takesText(b) : takesText(a);
+		if (isAny(a) || isAny(b)) return holdsBytes(isAny(a) ? b : a);
+		if (a.type === "array" && b.type === "array") {
+			const length = Math.max(a.prefixItems?.length ?? 0, b.prefixItems?.length ?? 0);
+			const item = (node: SchemaNode, index: number): SchemaNode | undefined => {
+				const schema = node.prefixItems === undefined ? node.items : node.prefixItems[index];
+				return schema === false ? undefined : (schema ?? {});
+			};
+			for (let index = 0; index <= length; index++) {
+				const [ia, ib] = [item(a, index), item(b, index)];
+				if (ia !== undefined && ib !== undefined && confusable(ia, ib)) return true;
+			}
+			return false;
+		}
+		if (a.type === "object" && b.type === "object") {
+			const keys = new Set([...Object.keys(a.properties ?? {}), ...Object.keys(b.properties ?? {})]);
+			for (const key of [...keys, undefined]) {
+				const [ka, kb] = [kept(a, key), kept(b, key)];
+				if (ka !== undefined && kb !== undefined && confusable(ka, kb)) return true;
+			}
+		}
+		return false;
+	};
+	const visited = new Set<SchemaNode>();
+	const visit = (node: SchemaNode, path: string): void => {
+		if (visited.has(node)) return;
+		visited.add(node);
+		const members = node.anyOf ?? [];
+		for (let i = 0; i < members.length; i++) {
+			for (let j = i + 1; j < members.length; j++) {
+				if (confusable(members[i] as SchemaNode, members[j] as SchemaNode)) {
+					fail(path, "is a union that one string could match as bytes in one member and as text in another");
+				}
+			}
+		}
+		for (const child of nodeChildren(node)) visit(child, path);
+	};
+	for (const [name, def] of defs) visit(def, `${service}.$defs.${name}`);
+	for (const [fnName, fn] of functions) {
+		fn.params.forEach((param) => visit(param.schema, `${service}.${fnName}(${param.name})`));
+		if (fn.result !== undefined) visit(fn.result, `${service}.${fnName}: its result`);
+	}
+}
+
+/** The schema nodes directly inside a node; references are not followed. */
+function nodeChildren(node: SchemaNode): SchemaNode[] {
+	return [
+		...(node.anyOf ?? []),
+		...(node.prefixItems ?? []),
+		...(typeof node.items === "object" ? [node.items] : []),
+		...Object.values(node.properties ?? {}),
+		...(typeof node.additionalProperties === "object" ? [node.additionalProperties] : []),
+	];
+}
+
 function deepFreeze<T>(value: T): T {
 	if (value instanceof Map) {
 		for (const child of value.values()) deepFreeze(child);
@@ -564,5 +734,6 @@ export function canonicalService(schema: ServiceSchema): CanonicalService {
 			...(rawFn.result === undefined ? {} : { result: canonicalNode(rawFn.result, `${where}.result`, defNames) }),
 		});
 	}
+	assertUnambiguousBytes(name, defs, functions);
 	return deepFreeze({ name, ...(description === undefined ? {} : { description }), defs, functions });
 }
