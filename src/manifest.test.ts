@@ -37,7 +37,7 @@ export declare function addNote(text: string, tags?: string[]): Promise<Note>;
 export function forget(id: number): Promise<void>;
 `;
 
-const notes = () => loadService(write("agent/services/notes.d.ts", NOTES));
+const notes = () => loadService(write("agent/api/notes.d.ts", NOTES));
 
 test("a manifest's exported functions are the service's, named by its file", () => {
 	const service = notes();
@@ -47,18 +47,17 @@ test("a manifest's exported functions are the service's, named by its file", () 
 	);
 	assert.equal(service.name, "notes");
 	assert.deepEqual(service.functions, ["addNote", "forget"]);
-	assert.match(service.declarations, /export declare function addNote\(text: string, tags\?: string\[\]\): Promise<Note>;/);
-	assert.match(service.declarations, /@param text What to remember\./);
-	assert.match(service.declarations, /export declare function forget\(id: number\): Promise<void>;/);
+	// What `@svc/notes` declares: the manifest as written.
+	assert.equal(service.declarations, NOTES);
 	assert.deepEqual(loadServices(tmp), []);
 });
 
-test("a manifest may be a symlink, and so may services/", () => {
+test("a manifest may be a symlink, and so may api/", () => {
 	const shared = write("shared/notes.d.ts", NOTES);
-	mkdirSync(path.join(tmp, "linked/services"), { recursive: true });
-	symlinkSync(shared, path.join(tmp, "linked/services/notes.d.ts"));
+	mkdirSync(path.join(tmp, "linked/api"), { recursive: true });
+	symlinkSync(shared, path.join(tmp, "linked/api/notes.d.ts"));
 	mkdirSync(path.join(tmp, "via-dir"));
-	symlinkSync(path.join(tmp, "linked/services"), path.join(tmp, "via-dir/services"));
+	symlinkSync(path.join(tmp, "linked/api"), path.join(tmp, "via-dir/api"));
 	for (const dir of ["linked", "via-dir"]) {
 		assert.deepEqual(
 			loadServices(path.join(tmp, dir)).map((service) => service.functions),
@@ -67,16 +66,12 @@ test("a manifest may be a symlink, and so may services/", () => {
 	}
 });
 
-test("the package documentation describes the service, and no declaration", () => {
+test("the package documentation describes the service", () => {
 	const service = notes();
 	assert.equal(service.description, "A notebook of short notes, each with tags to find it by later.");
-	// Note has no doc comment of its own, and must not inherit the package's.
-	assert.match(service.declarations, /^export interface Note \{/m);
-	assert.doesNotMatch(service.declarations, /A notebook of short notes/);
 
 	const undescribed = loadService(write("plain.d.ts", "/** Say hi. */\nexport function hi(): Promise<string>;\n"));
 	assert.equal(undescribed.description, undefined);
-	assert.match(undescribed.declarations, /\/\*\* Say hi\. \*\//);
 });
 
 test("a manifest outside the translatable subset is refused, naming the file and the reason", () => {
@@ -88,9 +83,16 @@ test("a manifest outside the translatable subset is refused, naming the file and
 		["enums", "export enum Color { Red }\nexport function f(c: Color): Promise<void>;", /line 1: declares something other/],
 		["hidden", "declare function f(): Promise<void>;\nexport function g(): Promise<void>;", /f: must be exported/],
 		["untyped", "export function f(a: string);", /f: needs a return type annotation/],
+		["bare", "export function f(): string;", /f: must return Promise<T>, or Promise<void> for no result/],
+		["bare-void", "export function f(): void;", /f: must return Promise<T>/],
+		["promise-like", "export function f(): PromiseLike<string>;", /f: must return Promise<T>/],
+		["qualified", "export function f(): globalThis.Promise<string>;", /f: must return Promise<T>/],
+		["aliased", "type Later<T> = Promise<T>;\nexport function f(): Later<string>;", /f: must return Promise<T>/],
+		["shadowed", "interface Promise<T> { value: T }\nexport function f(): Promise<string>;", /Promise: is the global Promise/],
 		["generic", "export function f<T>(a: T): Promise<T>;", /f: is generic/],
 		["overload", "export function f(a: string): Promise<void>;\nexport function f(a: number): Promise<void>;", /f: must be declared exactly once/],
 		["rest", "export function f(...a: string[]): Promise<void>;", /f\(a\): is a rest parameter/],
+		["default", "export function f(a: string, b: number = 1): Promise<void>;", /f\(b\): has a default value, which only an implementation can have; write it optional with \?/],
 		["undefined", "export function f(a: string | undefined): Promise<void>;", /f\(a\): has a type including `undefined`/],
 	];
 	for (const [name, text, reason] of refused) {
@@ -108,6 +110,8 @@ test("a type JSON cannot carry faithfully is refused by the identity check", () 
 	});
 	const counted = write("counted.d.ts", "export function counts(): Promise<Map<string, number>>;\n");
 	assert.throws(() => loadService(counted), /counts: its result cannot be carried as JSON without changing/);
+	const nested = write("nested.d.ts", "export function later(): Promise<Promise<string>>;\n");
+	assert.throws(() => loadService(nested), /later: its result cannot be carried as JSON without changing/);
 });
 
 test("arguments are checked, and reduced to what the manifest declares", () => {

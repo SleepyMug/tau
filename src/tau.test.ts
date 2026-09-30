@@ -103,6 +103,13 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 		["argkey", { args: [{ name: "a", type: "file", role: "in", readonly: true }] }, /a: unknown key "readonly"/],
 		["envname", { env: ["A-B"] }, /`env`: "A-B" is not a variable name/],
 		["envtwice", { env: ["A", "A"] }, /`env` lists A twice/],
+		["copytype", { copy: "modules" }, /`copy` must be an array/],
+		["copyabsolute", { copy: ["/etc"] }, /`copy`: "\/etc" is not a path inside the tau/],
+		["copyup", { copy: ["modules/../.."] }, /`copy`: "modules\/\.\.\/\.\." is not a path inside the tau/],
+		["copydot", { copy: ["./modules"] }, /is not a path inside the tau/],
+		["copyslash", { copy: ["modules/"] }, /is not a path inside the tau/],
+		["copytwice", { copy: ["modules", "modules"] }, /`copy` lists modules twice/],
+		["copyinside", { copy: ["modules/a", "modules"] }, /`copy`: modules\/a lies inside modules/],
 	];
 	for (const [name, json, reason] of refused) {
 		const files = { "PROMPT.md": "hi", "tau.json": typeof json === "string" ? json : JSON.stringify(json) };
@@ -126,6 +133,74 @@ test("the prompt may name only declared arguments", () => {
 		write("prompts/ok", { "PROMPT.md": "${a}${a} $${a} $$${a}", "tau.json": { args: [{ name: "a", type: "text" }] } }),
 	);
 	assert.equal(tau.bind(["x"], caller).prompt, "xx ${a} $${a}");
+});
+
+test("tau.json lists what a runtime copies, and without it, modules/ is copied", () => {
+	assert.deepEqual(loadTau(write("copies/none", { "PROMPT.md": "Hi." })).copy, []);
+	assert.deepEqual(loadTau(write("copies/default", { "PROMPT.md": "Hi.", "tau.json": {}, "modules/a/x.js": "" })).copy, [
+		"modules",
+	]);
+	const listed = { copy: ["modules/a/dist", "data"] };
+	const files = { "PROMPT.md": "Hi.", "tau.json": listed, "modules/a/dist/x.js": "", "modules/a/src/x.ts": "", "data/x": "" };
+	assert.deepEqual(loadTau(write("copies/listed", files)).copy, ["modules/a/dist", "data"]);
+
+	write("copies/refused", { "PROMPT.md": "Hi.", "tau.json": { copy: ["missing", "linked/x"] }, "build/x/y.js": "" });
+	symlinkSync("build", path.join(tmp, "copies/refused/linked"));
+	assert.throws(() => loadTau(path.join(tmp, "copies/refused")), (error: Error) => {
+		assert.deepEqual(error.message.split("\n").slice(1).map((line) => line.trim()), [
+			"copy: missing does not exist",
+			"copy: linked/x lies under a symlink; list where linked leads instead",
+		]);
+		return true;
+	});
+});
+
+test("a symlink in what a runtime reads is relative, stays in the tau, and in what is copied, leads to what is copied", () => {
+	const dir = write("links", {
+		"PROMPT.md": "Hi.",
+		"tau.json": { copy: ["modules"] },
+		"api/notes.d.ts": "",
+		"lib/skill/SKILL.md": "",
+		"lib/deep/SKILL.md": "",
+		"src/notes-plus/index.ts": "",
+		"modules/notes-plus/index.js": "",
+		"modules/node_modules/@svc/notes/package.json": "{}",
+		"modules/node_modules/.pnpm/yaml@2/node_modules/yaml/index.js": "",
+	});
+	const at = (target: string, file: string) => {
+		mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+		symlinkSync(target, path.join(dir, file));
+	};
+	// Fine: relative, inside, and within what is copied, or out of it only under @svc/.
+	at("../lib/skill", "skills/ok");
+	at("../../../../api/notes.d.ts", "modules/node_modules/@svc/notes/index.d.ts");
+	at(".pnpm/yaml@2/node_modules/yaml", "modules/node_modules/yaml");
+	// What no runtime reads is the author's.
+	at("/usr", "src/notes-plus/node_modules");
+	// Refused.
+	at("/usr", "skills/absolute");
+	at("../../outside.d.ts", "api/outside.d.ts");
+	at("../src/notes-plus", "modules/sources");
+	at("nowhere", "modules/dangling");
+	at("loop-b", "modules/loop-a");
+	at("loop-a", "modules/loop-b");
+	at("../lib/chain", "skills/chain");
+	at("/usr", "lib/chain");
+	at("../lib/deep", "skills/deep");
+	at("/usr", "lib/deep/absolute");
+	assert.throws(() => loadTau(dir), (error: Error) => {
+		assert.deepEqual(error.message.split("\n").slice(1).map((line) => line.trim()).sort(), [
+			"api/outside.d.ts: leads outside the tau, to " + path.join(tmp, "outside.d.ts"),
+			"lib/deep/absolute: leads to the absolute path /usr; a symlink in a tau is relative",
+			"modules/dangling: leads to modules/nowhere, which does not exist",
+			"modules/loop-a: is a loop of symlinks",
+			"modules/loop-b: is a loop of symlinks",
+			"modules/sources: leads to src/notes-plus, which the tau does not copy",
+			"skills/absolute: leads to the absolute path /usr; a symlink in a tau is relative",
+			"skills/chain: leads through lib/chain to the absolute path /usr; a symlink in a tau is relative",
+		]);
+		return true;
+	});
 });
 
 test("argv must fit the arguments, and no path may be or lie inside another", () => {

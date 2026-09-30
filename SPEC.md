@@ -13,26 +13,37 @@ in whatever way it chooses.
 ```
 my-agent/
 ├── PROMPT.md            # required: the prompt, naming each argument as ${name}
-├── tau.json             # optional: what it does, and the arguments, variables and paths it takes
+├── tau.json             # optional: what it does, what it takes, and what runtimes copy
 ├── skills/              # optional: skills (any dir with SKILL.md, recursively)
-├── services/            # optional: the services the agent needs, one manifest each
+├── api/                 # optional: the services the agent needs, one manifest each
 │   └── notes.d.ts
 └── modules/             # optional: packages the agent's programs can import
-    └── file-edits/
-        ├── package.json
-        ├── index.js
-        └── index.d.ts
+    ├── journal/
+    │   ├── package.json
+    │   ├── index.js
+    │   └── index.d.ts
+    └── node_modules/    # optional: what the modules import, and the types of the services
+        └── @svc/notes/
+            ├── package.json
+            └── index.d.ts → ../../../../api/notes.d.ts
 ```
 
-Any file or directory in a tau may be a symlink, and is read through it, so a tau can refer to
-files kept elsewhere: a shared manifest, a skill, or a module under development.
+A tau is self-contained, so that it can be moved or copied as a whole. What a runtime reads of it
+(PROMPT.md, tau.json, skills/, api/, and what tau.json lists in `copy`) may hold symlinks, but only
+relative ones, each leading, through any further symlinks, all relative, to something that exists
+in the tau. Runtimes keep symlinks as they are. Anything else in the directory, such as the
+sources a module is built from, is the author's, and no runtime reads it.
 
 Services and modules are both code the agent's programs can call, and differ in where it runs:
 - **A service runs outside** the agent's environment, where its provider is, and is reached over
   the socket. Anything that needs credentials, or reaches beyond the environment, is a service.
+  Programs and modules import it as `@svc/<name>`.
 - **A module runs inside**, in the same process as the program that imports it. A module adds
   code, not authority: it can do only what the agent's programs could do themselves, such as
   reading and writing files in the agent's working directory.
+
+A module may import services, so it can give the agent a service in the shape the agent needs: a
+thin wrapper, or one that adds what JSON cannot carry, such as dates, classes and iterators.
 
 ### Metadata
 
@@ -49,7 +60,8 @@ tau takes no arguments and sees no environment variables.
     { "name": "rules",  "type": "file", "role": "in" },
     { "name": "report", "type": "file", "role": "out" }
   ],
-  "env": ["LANG", "TZ"]
+  "env": ["LANG", "TZ"],
+  "copy": ["modules"]
 }
 ```
 
@@ -73,6 +85,13 @@ tau takes no arguments and sees no environment variables.
   has not set are left out: what a tau cannot do without, it takes as an argument. What the
   runtime needs for itself, such as `TAU_SOCKET` or a model's credentials, is not the tau's to
   list.
+- **`copy`** lists what a runtime copies into the agent's environment for its programs: paths in
+  the tau, relative to it, such as `modules`. Without it, a runtime copies `modules`, if the tau
+  has one. Each path exists, is written without `.` or `..` segments, and lies in the tau itself,
+  not under a symlink, and no path is, or lies inside, another. A symlink in what is copied leads
+  to what is copied, except under `modules/node_modules/@svc/` (see Modules). What is not listed
+  stays out of the agent's environment: a module's sources, say, when its build writes to what is
+  listed.
 - Nothing else: an unknown key is refused.
 
 `tau.json` says what the agent reads and writes, not how it gets there: that is up to the runtime
@@ -87,7 +106,7 @@ expanded, so `$1` or `$@` are text.
 
 ### Service manifests
 
-`services/<name>.d.ts` declares the service `<name>` in TypeScript. The file name is the service's
+`api/<name>.d.ts` declares the service `<name>` in TypeScript. The file name is the service's
 only name. It matches `^[A-Za-z0-9][A-Za-z0-9._-]*$`.
 
 ```ts
@@ -113,10 +132,16 @@ export declare function addNote(text: string, tags?: string[]): Promise<Note>;
 ```
 
 - **Functions:** every exported function is a function of the service, and there is at least one.
-  Parameters are positional; only trailing ones may be optional (`?` or a default). A result of
-  `Promise<T>` or `T` means the function returns `T`; `void` means it returns nothing.
-- **Types:** a manifest may declare interfaces and type aliases. Nothing else is allowed, including
-  imports, values, classes and enums, so a manifest is self-contained.
+  Parameters are positional; only trailing ones may be optional, written `name?: T`. A default
+  value is refused: a declaration cannot have one, and what an omitted argument means is the
+  provider's business.
+- **Results:** every function's return type is written `Promise<T>`, where `T` is the type of its
+  result, or `void` for a function without one. Any other return type is refused, including `T`
+  or `void` alone, `PromiseLike<T>`, `globalThis.Promise<T>`, an alias of `Promise`, and a `T`
+  that is itself a `Promise`.
+- **Types:** a manifest may declare interfaces and type aliases, except one named `Promise`.
+  Nothing else is allowed, including imports, values, classes and enums, so a manifest is
+  self-contained.
 - **Documentation:** TSDoc. The first doc comment, if it has `@packageDocumentation`, describes the
   service. A declaration's doc comment describes it, and `@param name - text` describes a
   parameter.
@@ -130,22 +155,31 @@ export declare function addNote(text: string, tags?: string[]): Promise<Note>;
 
 The check is mechanical: the manifest is translated to a small subset of JSON Schema (see the
 header of [src/schema/service-schema.ts](src/schema/service-schema.ts)). That schema is printed
-back as TypeScript, and `tsc` must find each function's parameters and awaited result identical to
+back as TypeScript, and `tsc` must find each function's parameters and return type identical to
 the manifest's. The JSON Schema is what runtimes validate calls against. The printed declarations
-are the manifest's canonical form, and a runtime can give them to the agent.
+serve only this check: `@svc/<name>` is typed by the manifest as written.
 
 ### Modules
 
-Each directory in `modules/` is a package that programs import by its `name` in `package.json`.
-The `@svc/` scope is reserved for services, and no two modules share a name.
+Each directory in `modules/` other than `node_modules/` is a package that programs import by its
+`name` in `package.json`. The `@svc/` scope is reserved for services, and no two modules share a
+name.
 
 - **A built package:** `package.json` has `name` and `exports`, and the `"."` entry has type
   declarations (a `types` condition, or a `.d.ts` beside the JavaScript). The package's
-  `description` describes it. How it was built is the author's business.
-- **Imports resolve as Node resolves them,** from the real location of the importing file. A
-  runtime adds nothing to resolve against but Node's builtins: no services, and no other modules.
-  So a module brings what it imports, whether in its own files, in a `node_modules/` of its own,
-  or through symlinks.
+  `description` describes it. How it was built is the author's business, and its `package.json`
+  is copied (see `copy`).
+- **Run from a copy:** a runtime runs modules from its copy of what `copy` lists, with every
+  symlink kept as it is. A module's imports resolve as Node resolves them, from the real location
+  of the importing file in that copy. A runtime adds nothing to resolve against but Node's
+  builtins and the services. So a module brings what it imports, in what is copied: in its own
+  files, in a `node_modules/` of its own, or in `modules/node_modules/`, which all modules share.
+- **Services:** a file in `modules/` imports the service `<name>` as `@svc/<name>`. In its copy, a
+  runtime puts its binding for each service at `modules/node_modules/@svc/<name>`, in place of
+  whatever the tau has there, and Node finds it from anywhere in `modules/`. The tau itself may
+  keep there, for each service, a package of the manifest's types to build modules against: a
+  `package.json` with `"types": "./index.d.ts"`, and `index.d.ts` a symlink to
+  `api/<name>.d.ts`. Anything there names a service of `api/`.
 - **Pure JavaScript:** a module imports no native addons (`.node` files), which would tie the tau
   to one platform.
 - **Node.js 24 or later:** runtimes run modules on Node.js 24 or later, so a module may use its
@@ -153,8 +187,9 @@ The `@svc/` scope is reserved for services, and no two modules share a name.
 
 Reading a tau checks only the package itself. Whether a module's imports resolve, and to what,
 depends on the files they lead to, so it is left to the runtime. `checkModule` in `@sleepymug/tau`
-follows every import from a module's entry points and reports each one that does not resolve,
-and each native addon, so a runtime can refuse a module before a program depends on it.
+follows every import from a module's entry points and reports each one that does not resolve to
+what the tau copies, each service `api/` does not declare, and each native addon, so a runtime can
+refuse a module before a program depends on it.
 
 ## Binding
 
@@ -185,7 +220,7 @@ or
 - **Framing:** UTF-8 JSON, one message per line, ended by the LF byte. Split only on LF, never on
   U+2028/U+2029, which JSON leaves unescaped inside strings.
 - **`args`** are positional, in the order of `params`. Trailing optional arguments may be left out.
-- **`result`** is required in a success response. A function without a `result` answers
+- **`result`** is required in a success response. A function that returns `Promise<void>` answers
   `{"result":null}`.
 - **Cancellation:** if the runtime closes its side before the response arrives, the call is
   cancelled, and the provider should stop the work. The runtime does not half-close while waiting.
@@ -235,4 +270,4 @@ Symlinks are followed, except at an `out` path, which the run replaces. `checkIn
 
 How services and modules reach the model is up to the runtime. For example, pi-run gives the model
 a TypeScript `execute` tool. The programs it runs import each service as `@svc/<name>`, typed by
-the declarations printed from its manifest, and each module by its package name.
+its manifest, and each module by its package name.

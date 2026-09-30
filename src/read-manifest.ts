@@ -11,7 +11,7 @@ import ts from "typescript";
 import type { FunctionSchema, JsonSchema, JsonValue, ParamSchema } from "./schema/service-schema.js";
 
 /**
- * Reads a service manifest, `services/<name>.d.ts`: its exported functions become the service's
+ * Reads a service manifest, `api/<name>.d.ts`: its exported functions become the service's
  * functions, and each parameter and result type is turned into JSON Schema, collecting every named
  * type they reach as `$defs`. Translating types is ts-json-schema-generator's job; it is silently
  * lossy (`Date` becomes a string), so nothing read here is trusted until verify.ts has compared
@@ -129,7 +129,11 @@ export function readManifest(file: string, text: string): ReadManifest {
 	// Interfaces, type aliases and exported functions; the rest has no place in a manifest.
 	const names: string[] = [];
 	for (const statement of source.statements) {
-		if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) continue;
+		if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) {
+			if (statement.name.text === "Promise")
+				reject("Promise:", "is the global Promise, and a manifest may not declare its own");
+			continue;
+		}
 		if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
 			const modifiers = ts.getModifiers(statement) ?? [];
 			const name = statement.name.text;
@@ -211,6 +215,9 @@ export function readManifest(file: string, text: string): ReadManifest {
 			if (param.dotDotDotToken !== undefined)
 				reject(`${name}(${paramName}):`, "is a rest parameter, which is not supported");
 			if (param.type === undefined) return reject(`${name}(${paramName}):`, "needs a type annotation");
+			// An initializer is for implementations (TS2371); `skipLibCheck` would let it through.
+			if (param.initializer !== undefined)
+				reject(`${name}(${paramName}):`, "has a default value, which only an implementation can have; write it optional with ?");
 			// TSDoc writes `@param name - text`; the hyphen is not part of the description.
 			const paramDescription = ts
 				.getJSDocParameterTags(param)
@@ -221,19 +228,22 @@ export function readManifest(file: string, text: string): ReadManifest {
 			return {
 				name: paramName,
 				...(paramDescription === "" ? {} : { description: paramDescription }),
-				optional: param.questionToken !== undefined || param.initializer !== undefined,
+				optional: param.questionToken !== undefined,
 				schema: typeSchema(param.type, `${name}(${paramName}):`),
 			};
 		});
 		if (fn.type === undefined) return reject(`${name}:`, "needs a return type annotation");
-		let result: ts.TypeNode = fn.type;
+		// Written `Promise<T>`, nothing else: verify.ts then holds the whole return type identical to
+		// the printed one, so `T` cannot be a Promise itself, and `Promise` must be the global one.
 		if (
-			ts.isTypeReferenceNode(result) &&
-			result.typeName.getText() === "Promise" &&
-			result.typeArguments?.length === 1
+			!ts.isTypeReferenceNode(fn.type) ||
+			!ts.isIdentifier(fn.type.typeName) ||
+			fn.type.typeName.text !== "Promise" ||
+			fn.type.typeArguments?.length !== 1
 		) {
-			result = result.typeArguments[0] as ts.TypeNode;
+			return reject(`${name}:`, "must return Promise<T>, or Promise<void> for no result");
 		}
+		const result = fn.type.typeArguments[0] as ts.TypeNode;
 		const fnDescription = ts.displayPartsToString(symbol.getDocumentationComment(checker)).trim();
 		raw[name] = {
 			...(fnDescription === "" ? {} : { description: fnDescription }),

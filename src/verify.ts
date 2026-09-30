@@ -5,8 +5,9 @@ import { COMPILER_OPTIONS, importName, memoryHost, type ReadManifest } from "./r
 
 /**
  * Proves a translation: for every function, the declarations printed from the JSON Schema must
- * mean what the manifest means. `tsc` checks that the parameter lists, and the awaited results,
- * are identical types: TypeScript's identity relation, which also tells optional properties, index
+ * mean what the manifest means. `tsc` checks that the parameter lists, and the return types (a
+ * `Promise<T>` on both sides), are identical types: TypeScript's identity relation, which also
+ * tells a nested `Promise<Promise<T>>` from `Promise<T>`, and optional properties, index
  * signatures, `readonly` and `any` apart. A lossy translation (`Map` printed as `{ size: number }`,
  * `Date` as `string`, `T | undefined` as optional) fails here, whatever the converter did. Identity
  * also refuses some faithful translations (`readonly` arrays, `any`); that is the incomplete side,
@@ -20,11 +21,7 @@ export function verifyTranslation(file: string, read: ReadManifest, declarations
 	const functions = Object.keys(read.functions);
 	const checks = functions.flatMap((name) => [
 		{ name, part: "parameters", code: `Same<Parameters<typeof O.${name}>, Parameters<typeof P.${name}>>` },
-		{
-			name,
-			part: "result",
-			code: `Same<Awaited<ReturnType<typeof O.${name}>>, Awaited<ReturnType<typeof P.${name}>>>`,
-		},
+		{ name, part: "result", code: `Same<ReturnType<typeof O.${name}>, ReturnType<typeof P.${name}>>` },
 	]);
 	const header = [
 		`import type * as O from ${JSON.stringify(importName(file))};`,

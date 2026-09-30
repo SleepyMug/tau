@@ -1,11 +1,12 @@
 # tau
 
 **tau** (Transportable Agent Unit) packages an agent as a directory. The directory holds a prompt,
-skills, and TypeScript manifests of the external services the agent needs, but never their
-implementations. Whoever runs a tau serves its services on one Unix socket, and a runtime such as
-pi-run binds them for the agent. A tau may also ship modules: packages that run with the agent's
-own programs. Its `tau.json` declares what it takes and gives: arguments, environment variables,
-and the files and directories it reads and writes. How they reach the agent is up to the runtime.
+skills, and, in `api/`, TypeScript manifests of the external services the agent needs, but never
+their implementations. Whoever runs a tau serves its services on one Unix socket, and a runtime
+such as pi-run binds them for the agent. A tau may also ship modules: packages that run with the
+agent's own programs, and may wrap its services. Its `tau.json` declares what it takes and gives:
+arguments, environment variables, and the files and directories it reads and writes; and what a
+runtime copies for the agent's programs. How they reach the agent is up to the runtime.
 
 - [SPEC.md](SPEC.md) specifies the directory, the metadata, the service manifests, the modules,
   what every runtime keeps to, and the socket protocol.
@@ -18,7 +19,7 @@ and the files and directories it reads and writes. How they reach the agent is u
 import { checkInputs, checkModule, checkOutputs, loadModules, loadServices, loadTau, TAU_SOCKET } from "@sleepymug/tau";
 
 // PROMPT.md and tau.json. A tau.json that breaks the spec, or a prompt naming an undeclared
-// argument, throws, naming its file and the reason.
+// argument, throws, naming its file and the reason; so do symlinks that break the spec.
 const tau = loadTau(agentDir);
 // What it does, and each argument: `text`, or a `file` or `dir` with its `role`, each with its
 // description, for usage or to offer the tau to another agent as a tool.
@@ -36,11 +37,11 @@ checkInputs(run);
 // it, at the caller's path.
 checkOutputs(run, locate);
 
-// Every services/<name>.d.ts of the tau, translated to JSON Schema and verified. A manifest that
+// Every api/<name>.d.ts of the tau, translated to JSON Schema and verified. A manifest that
 // cannot be translated without changing its meaning throws, naming its file and the reason.
 const services = loadServices(agentDir);
 for (const service of services) {
-	service.declarations; // the manifest's canonical form, printed from its JSON Schema
+	service.declarations; // the manifest as written: what `@svc/<name>` declares
 	// What to send the provider: validated, and reduced to what the manifest declares.
 	const args = service.checkArguments("addNote", ["buy milk"]);
 	// The same for what came back; null for a function without a result.
@@ -48,12 +49,14 @@ for (const service of services) {
 }
 
 // Every modules/<dir>/ of the tau: typed packages, named by their package.json.
-for (const module of loadModules(agentDir)) {
-	// Throws, listing every import that does not resolve from the module's entry points.
-	checkModule(module);
-	// Then make the package at `module.root` importable as `module.name`, e.g. with ts-executor's
-	// packageModule.
+for (const module of loadModules(tau)) {
+	// Throws, listing every import from the module's entry points that does not resolve to what
+	// the tau copies, or names a service api/ does not declare.
+	checkModule(module, tau);
 }
+// Then copy each of `tau.copy`, keeping symlinks as they are; put each service's binding at
+// modules/node_modules/@svc/<name> in the copy; and make each module importable by its name from
+// there, e.g. with ts-executor's packageModule.
 ```
 
 Apart from reading the tau and checking its paths, the library does no I/O: mounting, copying and

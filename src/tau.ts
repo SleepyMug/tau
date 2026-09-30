@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
+import { linkProblems } from "./links.js";
 
 /** What a path argument names on the caller's side. */
 export type PathType = "file" | "dir";
@@ -28,6 +29,11 @@ export interface Tau {
 	readonly args: readonly Arg[];
 	/** The variables of the caller's environment the agent may see. */
 	readonly env: readonly string[];
+	/**
+	 * What a runtime copies into the agent's environment for its programs: paths relative to the
+	 * tau, with `modules` the default when there is one.
+	 */
+	readonly copy: readonly string[];
 	/**
 	 * One run: `argv` checked against `args`, and the prompt expanded, with each path where `place`
 	 * puts it; by default, where the caller's path is. Throws TypeError.
@@ -73,18 +79,19 @@ const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
 
 /**
  * The tau at `dir`: its PROMPT.md, and its tau.json if it has one (without it, the tau takes no
- * arguments and sees no variables). Throws, naming the file and the reason, when tau.json breaks
- * the spec or the prompt names an argument tau.json does not declare. Services and modules are
- * loaded separately, with `loadServices` and `loadModules`.
+ * arguments, sees no variables, and has `modules` copied if it has one). Throws, naming the file
+ * and the reason, when tau.json breaks the spec or the prompt names an argument tau.json does not
+ * declare, and, listing every one, for a symlink that breaks the spec in what a runtime reads.
+ * Services and modules are loaded separately, with `loadServices` and `loadModules`.
  */
 export function loadTau(dir: string): Tau {
 	const absolute = path.resolve(dir);
 	const promptFile = path.join(absolute, "PROMPT.md");
 	if (!existsSync(promptFile)) throw new Error(`${absolute}: not a tau (no PROMPT.md)`);
 	const metadataFile = path.join(absolute, "tau.json");
-	const { description, args, env } = existsSync(metadataFile)
-		? readMetadata(metadataFile)
-		: { description: undefined, args: [], env: [] };
+	const metadata = existsSync(metadataFile) ? readMetadata(metadataFile) : undefined;
+	const { description, args = [], env = [] } = metadata ?? {};
+	const copy = metadata?.copy ?? (lexists(path.join(absolute, "modules")) ? ["modules"] : []);
 	const prompt = readFileSync(promptFile, "utf8");
 	let template: Template;
 	try {
@@ -92,6 +99,8 @@ export function loadTau(dir: string): Tau {
 	} catch (error) {
 		throw new Error(`${promptFile}: ${messageOf(error)}`);
 	}
+	const problems = [...copyProblems(absolute, copy), ...linkProblems(absolute, copy)];
+	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
 
 	return {
 		dir: absolute,
@@ -99,6 +108,7 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		args,
 		env,
+		copy,
 		bind(argv, caller, place = ({ host }) => host) {
 			if (argv.length !== args.length) {
 				const names = args.length === 0 ? "" : ` (${args.map((arg) => arg.name).join(", ")})`;
@@ -188,7 +198,12 @@ export function checkOutputs(run: Run, locate: (path: BoundPath) => string = ({ 
 		throw new Error(`the run did not leave what the tau declares:\n  ${problems.join("\n  ")}`);
 }
 
-function readMetadata(file: string): { description: string | undefined; args: Arg[]; env: string[] } {
+function readMetadata(file: string): {
+	description: string | undefined;
+	args: Arg[];
+	env: string[];
+	copy: string[] | undefined;
+} {
 	try {
 		let json: unknown;
 		try {
@@ -197,12 +212,13 @@ function readMetadata(file: string): { description: string | undefined; args: Ar
 			throw new TypeError(`is not JSON: ${messageOf(error)}`);
 		}
 		if (!isObject(json)) throw new TypeError("must be an object");
-		const { description, args = [], env = [], ...rest } = json;
+		const { description, args = [], env = [], copy, ...rest } = json;
 		refuseKeys(rest, "tau.json");
 		if (description !== undefined && typeof description !== "string")
 			throw new TypeError("`description` must be a string");
 		if (!Array.isArray(args)) throw new TypeError("`args` must be an array");
 		if (!Array.isArray(env)) throw new TypeError("`env` must be an array");
+		if (copy !== undefined && !Array.isArray(copy)) throw new TypeError("`copy` must be an array");
 
 		const declared = args.map(readArg);
 		const names = new Set<string>();
@@ -218,9 +234,52 @@ function readMetadata(file: string): { description: string | undefined; args: Ar
 			if (variables.has(name)) throw new TypeError(`\`env\` lists ${name} twice`);
 			variables.add(name);
 		}
-		return { description, args: declared, env: [...variables] };
+
+		const copied = copy?.map((entry: unknown) => {
+			if (typeof entry !== "string" || !isInnerPath(entry))
+				throw new TypeError(
+					`\`copy\`: ${JSON.stringify(entry)} is not a path inside the tau, relative, without . or .. segments`,
+				);
+			return entry;
+		});
+		const overlap = overlapping((copied ?? []).map((entry) => ({ name: entry, host: entry, at: entry })));
+		if (overlap !== undefined) {
+			const [inner, outer] = overlap;
+			throw new TypeError(
+				inner.at === outer.at ? `\`copy\` lists ${inner.at} twice` : `\`copy\`: ${inner.at} lies inside ${outer.at}`,
+			);
+		}
+		return { description, args: declared, env: [...variables], copy: copied };
 	} catch (error) {
 		throw new Error(`${file}: ${messageOf(error)}`);
+	}
+}
+
+/** Written `a/b/c`: relative, and without empty, `.` or `..` segments. */
+function isInnerPath(value: string): boolean {
+	return value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
+/** Each listed path exists, and lies in the tau itself, not through a symlink to a directory. */
+function copyProblems(dir: string, copy: readonly string[]): string[] {
+	const root = realpathSync(dir);
+	return copy.flatMap((entry) => {
+		const listed = path.join(dir, entry);
+		if (!lexists(listed)) return [`copy: ${entry} does not exist`];
+		const parent = path.dirname(entry);
+		return realpathSync(path.dirname(listed)) === path.join(root, parent)
+			? []
+			: [`copy: ${entry} lies under a symlink; list where ${parent} leads instead`];
+	});
+}
+
+/** Whether `file` exists, as a symlink or otherwise. */
+function lexists(file: string): boolean {
+	try {
+		lstatSync(file);
+		return true;
+	} catch {
+		return false;
 	}
 }
 
