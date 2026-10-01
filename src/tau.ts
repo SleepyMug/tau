@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { linkProblems } from "./links.js";
 
@@ -6,15 +6,14 @@ import { linkProblems } from "./links.js";
 export type PathType = "file" | "dir";
 
 /**
- * What the agent does with a path argument, and when (SPEC.md):
- * - `in`: reads it, as it was when the run started;
- * - `out`: writes it, starting with nothing where it sees it; a successful run replaces the
- *   caller's path;
+ * What the agent does with a path argument (SPEC.md):
+ * - `in`: reads it; it exists when the run starts;
+ * - `out`: writes it; the directory it goes in exists when the run starts, and if the agent returns
+ *   normally, it exists when the run ends;
  * - `share`: reads and changes the caller's own, not a copy, so its changes reach the caller as it
  *   makes them, whether or not the run succeeds.
  *
- * Paths may overlap, each keeping its role. A tau with no `share` path is functional; one with any
- * is procedural.
+ * Paths may overlap. A tau with no `share` path is functional; one with any is procedural.
  */
 export type PathRole = "in" | "out" | "share";
 
@@ -137,9 +136,8 @@ export function loadTau(dir: string): Tau {
 
 /**
  * Before a run: whether the caller's paths fit the tau. Each `in` and `share` path is a file or a
- * directory as declared, symlinks followed; each `out` goes into an existing directory, and would
- * replace only a path of its own type, or a symlink, which it replaces rather than follows. Paths
- * may overlap. Throws, listing every problem.
+ * directory as declared; each `out` goes into an existing directory, and is not there yet, or is
+ * of its own type. Symlinks are followed, and paths may overlap. Throws, listing every problem.
  */
 export function checkInputs(run: Run): void {
 	const problems: string[] = [];
@@ -155,7 +153,6 @@ export function checkInputs(run: Run): void {
 			problems.push(`${name}: cannot go in ${parent}, which ${parentProblem}`);
 			continue;
 		}
-		if (lstatSync(host, { throwIfNoEntry: false })?.isSymbolicLink() === true) continue;
 		const problem = shapeProblem(host, type);
 		if (problem !== undefined && problem !== MISSING) problems.push(`${name}: ${host} ${problem}`);
 	}
@@ -163,10 +160,10 @@ export function checkInputs(run: Run): void {
 }
 
 /**
- * When the agent is done: whether it left what the tau declares. Each `out` path is a file or a
- * directory as declared where `locate` finds it: by default the caller's path, which is right for a
- * runtime that runs the agent in place; one that works elsewhere checks its `out` paths where it
- * has them, before it puts them in place. Each `share` path is one where the caller has it, since
+ * When the run ends, if the agent returned normally: whether it left what the tau declares. Each `out` path is a file
+ * or a directory as declared where `locate` finds it: by default the caller's path, which is right
+ * for a runtime that runs the agent in place; one that works elsewhere checks its `out` paths where
+ * it has them, before it brings them back. Each `share` path is one where the caller has it, since
  * the agent worked on the caller's own. Throws, listing every problem.
  */
 export function checkOutputs(run: Run, locate: (path: BoundPath) => string = ({ host }) => host): void {

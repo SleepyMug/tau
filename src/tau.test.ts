@@ -195,7 +195,7 @@ test("the shapes of inputs and outputs are checked, listing every problem", () =
 	);
 	writeFileSync(path.join(home, "out/report.md"), "index.md: 1");
 	checkOutputs(run);
-	// An output may already be there, when it is of its kind: the run replaces it.
+	// An output may already be there, when it is of its kind: the agent writes over it.
 	checkInputs(run);
 
 	assert.throws(
@@ -224,12 +224,12 @@ test("paths may overlap, through symlinks too", () => {
 	symlinkSync("style.md", path.join(home, "rules.md"));
 	const tau = replace();
 	const bind = (...argv: string[]) => tau.bind(argv, { cwd: home, env: {} });
-	// A report written into the files the agent changes, and a file read as it was and replaced.
+	// A report written into the files the agent changes, and a file read and written.
 	checkInputs(bind("site", "a", "b", "style.md", "link/report.md"));
 	checkInputs(bind("site", "a", "b", "rules.md", "style.md"));
-	// An `out` that is a symlink is replaced, not followed, even to something of the other type.
+	// An `out` that is a symlink is followed, as every path is.
 	checkInputs(bind("site", "a", "b", "style.md", "rules.md"));
-	checkInputs(bind("site", "a", "b", "style.md", "link"));
+	assert.throws(() => checkInputs(bind("site", "a", "b", "style.md", "link")), /report: \S+\/link is not a file/);
 });
 
 test("a runtime that works elsewhere checks its outputs there with `locate`", () => {
