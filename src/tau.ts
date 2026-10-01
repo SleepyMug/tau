@@ -9,9 +9,12 @@ export type PathType = "file" | "dir";
  * What the agent does with a path argument (SPEC.md):
  * - `in`: reads it, and leaves it as it is;
  * - `out`: writes it, starting without it; a successful run replaces the caller's path;
- * - `inout`: reads and changes it.
+ * - `share`: reads and changes the caller's own, not a copy, so its changes reach the caller as it
+ *   makes them, whether or not the run succeeds.
+ *
+ * A tau with no `share` path is functional; one with any is procedural.
  */
-export type PathRole = "in" | "out" | "inout";
+export type PathRole = "in" | "out" | "share";
 
 /** An argument as `tau.json` declares it: tagged by `type`, and only a path has a `role`. */
 export type Arg =
@@ -68,7 +71,7 @@ export interface BoundPath {
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const TYPES: readonly string[] = ["text", "file", "dir"] satisfies Arg["type"][];
-const ROLES: readonly string[] = ["in", "out", "inout"] satisfies PathRole[];
+const ROLES: readonly string[] = ["in", "out", "share"] satisfies PathRole[];
 /** `$${` is a literal `${`; any other `${` must be a `${name}` of a declared argument. */
 const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
 
@@ -138,7 +141,7 @@ export function loadTau(dir: string): Tau {
 }
 
 /**
- * Before a run: whether the caller's paths fit the tau. Each `in` and `inout` path is a file or a
+ * Before a run: whether the caller's paths fit the tau. Each `in` and `share` path is a file or a
  * directory as declared; each `out` goes into an existing directory, and would replace only a path
  * of its own type. Symlinks are followed, and once they are, still no path may be, or lie inside,
  * another. Throws, listing every problem.
@@ -174,16 +177,17 @@ export function checkInputs(run: Run): void {
 }
 
 /**
- * After a successful run: whether the agent left what the tau declares. Each `out` and `inout`
- * path is a file or a directory as declared, where `locate` finds it: by default the caller's
- * path, which is right for a runtime that runs the agent in place, or has brought the paths back.
- * Throws, listing every problem.
+ * After a successful run: whether the agent left what the tau declares. Each `out` path is a file
+ * or a directory as declared where `locate` finds it: by default the caller's path, which is right
+ * for a runtime that runs the agent in place, or has brought its `out` paths back. Each `share`
+ * path is one where the caller has it, since the agent worked on the caller's own. Throws, listing
+ * every problem.
  */
 export function checkOutputs(run: Run, locate: (path: BoundPath) => string = ({ host }) => host): void {
 	const problems: string[] = [];
 	for (const bound of run.paths) {
 		if (bound.role === "in") continue;
-		const at = locate(bound);
+		const at = bound.role === "share" ? bound.host : locate(bound);
 		const problem = shapeProblem(at, bound.type);
 		if (problem !== undefined) problems.push(`${bound.name}: ${at} ${problem}`);
 	}

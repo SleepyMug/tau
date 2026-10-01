@@ -32,8 +32,8 @@ const run = tau.bind(argv, { cwd: process.cwd(), env: process.env }, place);
 // inside another once symlinks are followed. Throws, listing every problem.
 checkInputs(run);
 // ... run the agent on run.prompt, with run.paths and run.env ...
-// After a successful run: each out and inout path as declared, where `locate` finds it; without
-// it, at the caller's path.
+// After a successful run: each out path as declared, where `locate` finds it (without it, at the
+// caller's path), and each share path at the caller's path.
 checkOutputs(run, locate);
 
 // Every api/<name>.d.ts of the tau, once TypeScript finds them and what they import free of

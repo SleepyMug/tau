@@ -45,7 +45,7 @@ tau takes no arguments and sees no environment variables.
 {
   "description": "Replace text in every file of a directory, and report what changed.",
   "args": [
-    { "name": "src",    "type": "dir",  "role": "inout", "description": "The files to edit." },
+    { "name": "src",    "type": "dir",  "role": "share", "description": "The files to edit." },
     { "name": "old",    "type": "text", "description": "The text to replace." },
     { "name": "new",    "type": "text", "description": "What to replace it with." },
     { "name": "rules",  "type": "file", "role": "in" },
@@ -66,19 +66,25 @@ tau takes no arguments and sees no environment variables.
     - `out`: writes it. Its directory exists before the run, and the agent starts without it:
       what the caller has at the path, if anything, is not shown to the agent, and a successful
       run replaces it with what the agent wrote.
-    - `inout`: reads and changes it. It exists before the run, and a successful run leaves the
-      agent's changes in it.
+    - `share`: reads and changes it. It exists before the run, and the agent works on the
+      caller's own file or directory, not a copy, so its changes reach the caller as it makes
+      them, whether or not the run succeeds.
 
   No path may be another, or lie inside another, even once symlinks are followed, so that a
   runtime can place each on its own.
+
+  A tau with no `share` path is **functional**: it reads its `in` paths, writes its `out` paths,
+  and changes nothing else of the caller's, so a runtime can run it wherever it can copy those in
+  and out. A tau with a `share` path is **procedural**: it changes the caller's files as it goes,
+  so it runs only where the runtime can give it those files themselves.
 - **`env`** names the variables of the caller's environment the agent may see. Those the caller
   has not set are left out: what a tau cannot do without, it takes as an argument. What the
   runtime needs for itself, such as a model's credentials or what its implementations use, is not
   the tau's to list.
 - Nothing else: an unknown key is refused.
 
-`tau.json` says what the agent reads and writes, not how it gets there: that is up to the runtime
-(see Running).
+`tau.json` says what the agent reads and writes, not where the agent sees it: that is up to the
+runtime (see Running).
 
 ### Prompt
 
@@ -168,18 +174,19 @@ checks this.
 How the agent reaches its paths and environment is up to the runtime.
 - **In place**, the agent sees each path where the caller has it, and the caller's environment.
   Nothing keeps it from other files and variables, or from changing an `in` path.
-- **Isolated**, in a sandbox or a container, the runtime places each path where it chooses, by
-  mounting or copying it, and gives the agent only the variables `env` names. It may keep the
-  agent from changing its `in` paths.
+- **Isolated**, in a sandbox or a container, the runtime places each path where it chooses: an
+  `in` or `out` path by copying or mounting it, and a `share` path by mounting it, since it must
+  stay the caller's own. It gives the agent only the variables `env` names, and may keep the agent
+  from changing its `in` paths.
 
 Either way, the prompt names each path where the agent sees it.
 
 ### Results
 
-A run gives back whether it succeeded, the agent's final message, and its `out` and `inout`
-paths. Anything else the agent writes is scratch: nothing after the run may rely on it, and a
-runtime may keep it or throw it away. So a tau does not rely on its working directory either,
-which is up to the runtime.
+A run gives back whether it succeeded, the agent's final message, and its `out` paths; its `share`
+paths already hold its changes. Anything else the agent writes is scratch: nothing after the run
+may rely on it, and a runtime may keep it or throw it away. So a tau does not rely on its working
+directory either, which is up to the runtime.
 
 A run fails when the runtime cannot run the agent to the end, or when its paths do not fit
 (below). Whether the agent did what it was asked is not the runtime's to judge: a tau that needs
@@ -190,13 +197,15 @@ and exits with 0 only when the run succeeded.
 ### Paths
 
 A runtime keeps to what `tau.json` promises the caller:
-- **Before the run**, each `in` and `inout` path is a file or a directory as declared, and each
+- **Before the run**, each `in` and `share` path is a file or a directory as declared, and each
   `out` goes into an existing directory, and replaces nothing of the other type. No path is, or
-  lies inside, another. A runtime refuses to start a run whose paths do not fit.
+  lies inside, another. A runtime refuses to start a run whose paths do not fit, or a procedural
+  tau where it cannot give the agent its `share` paths themselves.
 - **After a successful run**, each `out` path holds what the agent wrote there, in place of what
-  the caller had, and each `out` and `inout` path is a file or a directory as declared. A runtime
+  the caller had, and each `out` and `share` path is a file or a directory as declared. A runtime
   reports a run whose paths do not fit as failed.
-- **After a failed run**, what the `out` and `inout` paths hold is up to the runtime.
+- **After a failed run**, what the `out` paths hold is up to the runtime, and each `share` path
+  holds what the agent left in it.
 
 Symlinks are followed, except at an `out` path, which the run replaces. `checkInputs` and
 `checkOutputs` in `@sleepymug/tau` check all of this.

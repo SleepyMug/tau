@@ -26,7 +26,7 @@ Then write each changed file, and how many replacements it got, to \${report}.
 const REPLACE = {
 	description: "Replace text in every file of a directory, and report what changed.",
 	args: [
-		{ name: "src", type: "dir", role: "inout", description: "The files to edit." },
+		{ name: "src", type: "dir", role: "share", description: "The files to edit." },
 		{ name: "old", type: "text" },
 		{ name: "new", type: "text" },
 		{ name: "rules", type: "file", role: "in" },
@@ -44,7 +44,7 @@ test("by default, the agent sees each path where the caller's is", () => {
 	const tau = replace();
 	assert.equal(tau.description, REPLACE.description);
 	assert.deepEqual(tau.args.slice(0, 2), [
-		{ name: "src", type: "dir", role: "inout", description: "The files to edit." },
+		{ name: "src", type: "dir", role: "share", description: "The files to edit." },
 		{ name: "old", type: "text", description: undefined },
 	]);
 	const run = tau.bind(ARGV, caller);
@@ -57,7 +57,7 @@ Then write each changed file, and how many replacements it got, to /home/u/out/r
 	// Only what tau.json lists, and only what the caller has set.
 	assert.deepEqual(run.env, { LANG: "C.UTF-8" });
 	assert.deepEqual(run.paths, [
-		{ name: "src", type: "dir", role: "inout", host: "/home/u/site", view: "/home/u/site" },
+		{ name: "src", type: "dir", role: "share", host: "/home/u/site", view: "/home/u/site" },
 		{ name: "rules", type: "file", role: "in", host: "/home/u/style.md", view: "/home/u/style.md" },
 		{ name: "report", type: "file", role: "out", host: "/home/u/out/report.md", view: "/home/u/out/report.md" },
 	]);
@@ -65,12 +65,12 @@ Then write each changed file, and how many replacements it got, to /home/u/out/r
 
 test("a runtime may place each path elsewhere, and the prompt names it there", () => {
 	const run = replace().bind(ARGV, caller, ({ name, role }) => `/${role}/${name}`);
-	assert.match(run.prompt, /^In every file under \/inout\/src, /);
+	assert.match(run.prompt, /^In every file under \/share\/src, /);
 	assert.match(run.prompt, /the rules in \/in\/rules\.\n.* to \/out\/report\.\n$/);
 	assert.deepEqual(
 		run.paths.map(({ host, view }) => [host, view]),
 		[
-			["/home/u/site", "/inout/src"],
+			["/home/u/site", "/share/src"],
 			["/home/u/style.md", "/in/rules"],
 			["/home/u/out/report.md", "/out/report"],
 		],
@@ -96,8 +96,8 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 		["twice", { args: [{ name: "a", type: "text" }, { name: "a", type: "text" }] }, /two arguments are named a/],
 		["untyped", { args: [{ name: "a" }] }, /a: needs a `type`, one of text, file, dir/],
 		["type", { args: [{ name: "a", type: "path" }] }, /a: `type` "path" is not one of text, file, dir/],
-		["roleless", { args: [{ name: "a", type: "file" }] }, /a: a file needs a `role`, one of in, out, inout/],
-		["role", { args: [{ name: "a", type: "dir", role: "read" }] }, /a: `role` "read" is not one of in, out, inout/],
+		["roleless", { args: [{ name: "a", type: "file" }] }, /a: a file needs a `role`, one of in, out, share/],
+		["role", { args: [{ name: "a", type: "dir", role: "read" }] }, /a: `role` "read" is not one of in, out, share/],
 		["textrole", { args: [{ name: "a", type: "text", role: "in" }] }, /a: a text argument has no `role`/],
 		["argdescription", { args: [{ name: "a", type: "text", description: 1 }] }, /a: `description` must be a string/],
 		["argkey", { args: [{ name: "a", type: "file", role: "in", readonly: true }] }, /a: unknown key "readonly"/],
@@ -239,7 +239,7 @@ test("no path may be, or lie inside, another once symlinks are followed", () => 
 });
 
 test("a runtime that works elsewhere checks its outputs there with `locate`", () => {
-	const stage = write("stage", { "inout/src/index.md": "bar", "out/report": "done" });
+	const stage = write("stage", { "out/report": "done" });
 	const home = write("home2", { "site/index.md": "foo", "style.md": "rules", "out/.keep": "" });
 	const run = replace().bind(["site", "foo", "bar", "style.md", "out/report.md"], { cwd: home, env: {} }, (p) => `/${p.role}/${p.name}`);
 	checkInputs(run);
@@ -250,4 +250,7 @@ test("a runtime that works elsewhere checks its outputs there with `locate`", ()
 	rmSync(path.join(stage, "out/report"));
 	mkdirSync(path.join(stage, "out/report"));
 	assert.throws(() => checkOutputs(run, locate), /report: \S+\/stage\/out\/report is not a file/);
+	// A share path is the caller's own, wherever the agent saw it.
+	rmSync(path.join(home, "site"), { recursive: true });
+	assert.throws(() => checkOutputs(run, locate), /src: \S+\/home2\/site does not exist/);
 });
