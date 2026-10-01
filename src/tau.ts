@@ -35,9 +35,10 @@ export interface Tau {
 	readonly env: readonly string[];
 	/**
 	 * One run: `argv` checked against `args`, and the prompt expanded, with each path where `place`
-	 * puts it; by default, where the caller's path is. Throws TypeError.
+	 * puts it; by default, where the caller's path is; and `${self}` where the agent sees the tau's
+	 * own directory, `self`; by default, `dir`. Throws TypeError.
 	 */
-	bind(argv: readonly string[], caller: Caller, place?: Place): Run;
+	bind(argv: readonly string[], caller: Caller, place?: Place, self?: string): Run;
 }
 
 /** Who runs the tau. */
@@ -52,7 +53,10 @@ export type Place = (path: Omit<BoundPath, "view">) => string;
 
 /** What a runtime needs to set up one run: computed, not done. */
 export interface Run {
-	/** PROMPT.md with each `${name}` replaced: a text argument by its value, a path by its view. */
+	/**
+	 * PROMPT.md with each `${name}` replaced: a text argument by its value, a path by its view, and
+	 * `${self}` by where the agent sees the tau's own directory.
+	 */
 	readonly prompt: string;
 	/** The tau's `env`, with the caller's values; unset ones are left out. */
 	readonly env: Readonly<Record<string, string>>;
@@ -71,9 +75,11 @@ export interface BoundPath {
 }
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+/** What `${self}` names in a prompt: the tau's own directory, so no argument has this name. */
+const SELF = "self";
 const TYPES: readonly string[] = ["text", "file", "dir"] satisfies Arg["type"][];
 const ROLES: readonly string[] = ["in", "out", "share"] satisfies PathRole[];
-/** `$${` is a literal `${`; any other `${` must be a `${name}` of a declared argument. */
+/** `$${` is a literal `${`; any other `${` must be `${self}` or a `${name}` of a declared argument. */
 const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
 
 /**
@@ -93,7 +99,7 @@ export function loadTau(dir: string): Tau {
 	const prompt = readFileSync(promptFile, "utf8");
 	let template: Template;
 	try {
-		template = parsePrompt(prompt, new Set(args.map((arg) => arg.name)));
+		template = parsePrompt(prompt, new Set([SELF, ...args.map((arg) => arg.name)]));
 	} catch (error) {
 		throw new Error(`${promptFile}: ${messageOf(error)}`);
 	}
@@ -106,12 +112,12 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		args,
 		env,
-		bind(argv, caller, place = ({ host }) => host) {
+		bind(argv, caller, place = ({ host }) => host, self = absolute) {
 			if (argv.length !== args.length) {
 				const names = args.length === 0 ? "" : ` (${args.map((arg) => arg.name).join(", ")})`;
 				throw new TypeError(`expected ${args.length} argument(s)${names}, got ${argv.length}`);
 			}
-			const values = new Map<string, string>();
+			const values = new Map<string, string>([[SELF, self]]);
 			const paths: BoundPath[] = [];
 			args.forEach((arg, index) => {
 				const value = argv[index] as string;
@@ -224,6 +230,7 @@ function readArg(value: unknown, index: number): Arg {
 	const { name, type, role, description, ...rest } = value;
 	if (typeof name !== "string" || !NAME.test(name))
 		throw new TypeError(`args[${index}] needs a \`name\` matching ${NAME.source}`);
+	if (name === SELF) throw new TypeError(`args[${index}]: \`${SELF}\` names the tau's own directory, so no argument has that name`);
 	refuseKeys(rest, name);
 	if (description !== undefined && typeof description !== "string")
 		throw new TypeError(`${name}: \`description\` must be a string`);
@@ -263,7 +270,7 @@ function parsePrompt(prompt: string, declared: ReadonlySet<string>): Template {
 		if (closed === "") throw new TypeError(`line ${line}: ${placeholder} is not closed; write $\${ for a literal \${`);
 		if (!declared.has(name))
 			throw new TypeError(
-				`line ${line}: ${placeholder} is not an argument tau.json declares; write $\${ for a literal \${`,
+				`line ${line}: ${placeholder} is neither \${${SELF}} nor an argument tau.json declares; write $\${ for a literal \${`,
 			);
 		text.push(chunk);
 		names.push(name);

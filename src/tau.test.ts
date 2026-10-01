@@ -111,11 +111,11 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 	}
 });
 
-test("the prompt may name only declared arguments", () => {
+test("the prompt may name only declared arguments, and the tau's own directory", () => {
 	const refused: [string, RegExp][] = [
-		["Look at ${missing}.", /PROMPT\.md: line 1: \$\{missing\} is not an argument tau\.json declares/],
-		["Hi\n${1:-you}", /line 2: \$\{1:-you\} is not an argument/],
-		["Hi ${@:2}", /\$\{@:2\} is not an argument/],
+		["Look at ${missing}.", /PROMPT\.md: line 1: \$\{missing\} is neither \$\{self\} nor an argument tau\.json declares/],
+		["Hi\n${1:-you}", /line 2: \$\{1:-you\} is neither/],
+		["Hi ${@:2}", /\$\{@:2\} is neither/],
 		["Hi ${src", /line 1: \$\{src is not closed/],
 	];
 	for (const [index, [prompt, reason]] of refused.entries()) {
@@ -126,6 +126,20 @@ test("the prompt may name only declared arguments", () => {
 		write("prompts/ok", { "PROMPT.md": "${a}${a} $${a} $$${a}", "tau.json": { args: [{ name: "a", type: "text" }] } }),
 	);
 	assert.equal(tau.bind(["x"], caller).prompt, "xx ${a} $${a}");
+});
+
+test("${self} is where the agent sees the tau's own directory: where it is, unless the runtime puts it elsewhere", () => {
+	const dir = write("self", {
+		"PROMPT.md": "Run ${self}/agents/counter on ${text}; $${self} stays.",
+		"tau.json": { args: [{ name: "text", type: "file", role: "in" }] },
+	});
+	const tau = loadTau(dir);
+	assert.equal(tau.bind(["a.txt"], caller).prompt, `Run ${dir}/agents/counter on ${caller.cwd}/a.txt; \${self} stays.`);
+	const placed = tau.bind(["a.txt"], caller, ({ name }) => `/in/${name}`, "/agent");
+	assert.equal(placed.prompt, "Run /agent/agents/counter on /in/text; ${self} stays.");
+	// The name is the tau's own, so no argument takes it.
+	const refused = write("self-arg", { "PROMPT.md": "${self}", "tau.json": { args: [{ name: "self", type: "text" }] } });
+	assert.throws(() => loadTau(refused), /args\[0\]: `self` names the tau's own directory, so no argument has that name/);
 });
 
 test("a symlink in what a runtime reads is relative, and stays in the tau", () => {

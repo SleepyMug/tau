@@ -27,7 +27,8 @@ tau.args;
 // Checks argv against the arguments, and computes, without doing it, what the run needs: the
 // prompt with each ${name} expanded, the variables `env` names, and for each path its role, the
 // caller's path, and where the agent sees it. `place` chooses that; without it, the caller's path.
-const run = tau.bind(argv, { cwd: process.cwd(), env: process.env }, place);
+// ${self} becomes where the agent sees the tau's own directory: `self`, or without it, `tau.dir`.
+const run = tau.bind(argv, { cwd: process.cwd(), env: process.env }, place, self);
 // Each input a file or a directory as declared, and each output's directory there; paths may
 // overlap. Throws, listing every problem.
 checkInputs(run);

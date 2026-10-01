@@ -33,8 +33,9 @@ my-agent/
 A tau is self-contained, so that it can be moved or copied as a whole. What a runtime reads of it
 (PROMPT.md, tau.json, skills/ and api/) may hold symlinks, but only relative ones, each leading,
 through any further symlinks, all relative, to something that exists in the tau. Runtimes keep
-symlinks as they are. Anything else in the directory, such as the sources of its skills, is the
-author's, and no runtime reads it.
+symlinks as they are. Anything else in the directory, such as the sources of its skills, or a tau
+it runs, is the author's: no runtime reads it, though the agent may, where `${self}` names the
+directory (see [Prompt](#prompt)).
 
 ### Metadata
 
@@ -58,7 +59,8 @@ tau takes no arguments and sees no environment variables.
 - **`description`** says what the tau does, for whoever runs it, and each argument may have one
   too. A runtime can show them as usage, or offer the tau to another agent as a tool.
 - **`args`** are positional, in this order, and all required. `name` matches
-  `^[A-Za-z_][A-Za-z0-9_]*$`, and `type` says what the argument is:
+  `^[A-Za-z_][A-Za-z0-9_]*$` and is not `self`, which names the tau's own directory (see
+  [Prompt](#prompt)), and `type` says what the argument is:
   - `text`: any string, the empty one included.
   - `file` or `dir`: the path of a file or a directory on the caller's side, resolved against the
     caller's working directory. Its `role` says what the agent does with it:
@@ -90,9 +92,11 @@ runtime (see Running).
 ### Prompt
 
 `PROMPT.md` is the prompt. The runtime replaces each `${name}` with the argument `name`: a text
-argument with its value, and a path with where the agent sees it. `$${` stands for a literal `${`,
-and any other `${` that does not name an argument of `tau.json` is refused. Nothing else is
-expanded, so `$1` or `$@` are text.
+argument with its value, and a path with where the agent sees it. It replaces `${self}` with where
+the agent sees the tau's own directory, so the prompt can name what the tau holds beside its
+prompt, such as a file to read or another tau to run. `$${` stands for a literal `${`, and any
+other `${` that is neither `${self}` nor names an argument of `tau.json` is refused. Nothing else
+is expanded, so `$1` or `$@` are text.
 
 ### APIs
 
@@ -172,15 +176,17 @@ checks this.
 
 ## Running
 
-How the agent reaches its paths and environment is up to the runtime.
-- **In place**, the agent sees each path where the caller has it, and the caller's environment.
-  Nothing keeps it from other files and variables, or from changing an `in` path.
+How the agent reaches its paths, its environment and the tau's own directory is up to the runtime.
+- **In place**, the agent sees each path where the caller has it, the tau's directory where it
+  is, and the caller's environment. Nothing keeps it from other files and variables, or from
+  changing an `in` path or the tau.
 - **Isolated**, in a sandbox or a container, the runtime places each path where it chooses: an
   `in` or `out` path by copying or mounting it, and a `share` path by mounting it, since it must
-  stay the caller's own. It gives the agent only the variables `env` names, and may keep the
-  agent from changing its `in` paths.
+  stay the caller's own. It places the tau's directory too, whole, by copying or mounting it. It
+  gives the agent only the variables `env` names, and may keep the agent from changing its `in`
+  paths or the tau.
 
-Either way, the prompt names each path where the agent sees it.
+Either way, the prompt names each path, and the tau's directory, where the agent sees it.
 
 ### Results
 
