@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { linkProblems } from "./links.js";
 
@@ -6,13 +6,15 @@ import { linkProblems } from "./links.js";
 export type PathType = "file" | "dir";
 
 /**
- * What the agent does with a path argument (SPEC.md):
- * - `in`: reads it, and leaves it as it is;
- * - `out`: writes it, starting without it; a successful run replaces the caller's path;
+ * What the agent does with a path argument, and when (SPEC.md):
+ * - `in`: reads it, as it was when the run started;
+ * - `out`: writes it, starting with nothing where it sees it; a successful run replaces the
+ *   caller's path;
  * - `share`: reads and changes the caller's own, not a copy, so its changes reach the caller as it
  *   makes them, whether or not the run succeeds.
  *
- * A tau with no `share` path is functional; one with any is procedural.
+ * Paths may overlap, each keeping its role. A tau with no `share` path is functional; one with any
+ * is procedural.
  */
 export type PathRole = "in" | "out" | "share";
 
@@ -124,13 +126,6 @@ export function loadTau(dir: string): Tau {
 				paths.push({ ...bound, view });
 				values.set(arg.name, view);
 			});
-			const overlap = overlapping(paths.map(({ name, host }) => ({ name, host, at: host })));
-			if (overlap !== undefined) {
-				const [inner, outer] = overlap;
-				throw new TypeError(
-					`${inner.name} (${inner.host}) and ${outer.name} (${outer.host}) overlap: no path may be, or lie inside, another`,
-				);
-			}
 			const set = env.flatMap((name) => {
 				const value = caller.env[name];
 				return value === undefined ? [] : [[name, value] as const];
@@ -142,19 +137,16 @@ export function loadTau(dir: string): Tau {
 
 /**
  * Before a run: whether the caller's paths fit the tau. Each `in` and `share` path is a file or a
- * directory as declared; each `out` goes into an existing directory, and would replace only a path
- * of its own type. Symlinks are followed, and once they are, still no path may be, or lie inside,
- * another. Throws, listing every problem.
+ * directory as declared, symlinks followed; each `out` goes into an existing directory, and would
+ * replace only a path of its own type, or a symlink, which it replaces rather than follows. Paths
+ * may overlap. Throws, listing every problem.
  */
 export function checkInputs(run: Run): void {
 	const problems: string[] = [];
-	// Where each path really is. What an `out` would replace is not followed: the run replaces it.
-	const real: Located[] = [];
 	for (const { name, type, role, host } of run.paths) {
 		if (role !== "out") {
 			const problem = shapeProblem(host, type);
 			if (problem !== undefined) problems.push(`${name}: ${host} ${problem}`);
-			else real.push({ name, host, at: realpathSync(host) });
 			continue;
 		}
 		const parent = path.dirname(host);
@@ -163,25 +155,19 @@ export function checkInputs(run: Run): void {
 			problems.push(`${name}: cannot go in ${parent}, which ${parentProblem}`);
 			continue;
 		}
+		if (lstatSync(host, { throwIfNoEntry: false })?.isSymbolicLink() === true) continue;
 		const problem = shapeProblem(host, type);
 		if (problem !== undefined && problem !== MISSING) problems.push(`${name}: ${host} ${problem}`);
-		else real.push({ name, host, at: path.join(realpathSync(parent), path.basename(host)) });
-	}
-	const overlap = overlapping(real);
-	if (overlap !== undefined) {
-		const [inner, outer] = overlap;
-		const how = inner.at === outer.at ? `both are ${inner.at}` : `${inner.at} lies inside ${outer.at}`;
-		problems.push(`${inner.name} (${inner.host}) and ${outer.name} (${outer.host}) overlap once symlinks are followed: ${how}`);
 	}
 	if (problems.length > 0) throw new Error(`the arguments do not fit the tau:\n  ${problems.join("\n  ")}`);
 }
 
 /**
- * After a successful run: whether the agent left what the tau declares. Each `out` path is a file
- * or a directory as declared where `locate` finds it: by default the caller's path, which is right
- * for a runtime that runs the agent in place, or has brought its `out` paths back. Each `share`
- * path is one where the caller has it, since the agent worked on the caller's own. Throws, listing
- * every problem.
+ * When the agent is done: whether it left what the tau declares. Each `out` path is a file or a
+ * directory as declared where `locate` finds it: by default the caller's path, which is right for a
+ * runtime that runs the agent in place; one that works elsewhere checks its `out` paths where it
+ * has them, before it puts them in place. Each `share` path is one where the caller has it, since
+ * the agent worked on the caller's own. Throws, listing every problem.
  */
 export function checkOutputs(run: Run, locate: (path: BoundPath) => string = ({ host }) => host): void {
 	const problems: string[] = [];
@@ -255,25 +241,6 @@ function readArg(value: unknown, index: number): Arg {
 	if (typeof role !== "string" || !ROLES.includes(role))
 		throw new TypeError(`${name}: \`role\` ${JSON.stringify(role)} is not one of ${ROLES.join(", ")}`);
 	return { name, type: type as PathType, role: role as PathRole, description };
-}
-
-/** A path argument, and where it is compared with the others. */
-interface Located {
-	readonly name: string;
-	readonly host: string;
-	readonly at: string;
-}
-
-/** The first two paths of which one is, or lies inside, the other: `[inner, outer]`. */
-function overlapping(paths: readonly Located[]): [Located, Located] | undefined {
-	for (const [index, first] of paths.entries()) {
-		for (const second of paths.slice(index + 1)) {
-			const [outer, inner] = first.at.length <= second.at.length ? [first, second] : [second, first];
-			if (inner.at === outer.at || inner.at.startsWith(outer.at.endsWith("/") ? outer.at : `${outer.at}/`))
-				return [inner, outer];
-		}
-	}
-	return undefined;
 }
 
 /** A prompt as text around placeholders: `text` has one more entry than `names`. */

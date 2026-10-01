@@ -28,11 +28,12 @@ tau.args;
 // prompt with each ${name} expanded, the variables `env` names, and for each path its role, the
 // caller's path, and where the agent sees it. `place` chooses that; without it, the caller's path.
 const run = tau.bind(argv, { cwd: process.cwd(), env: process.env }, place);
-// Each input a file or a directory as declared, each output's directory there, and no path
-// inside another once symlinks are followed. Throws, listing every problem.
+// Each input a file or a directory as declared, and each output's directory there. Paths may
+// overlap; whether the runtime can keep each to its role is its own to check. Throws, listing
+// every problem.
 checkInputs(run);
 // ... run the agent on run.prompt, with run.paths and run.env ...
-// After a successful run: each out path as declared, where `locate` finds it (without it, at the
+// When the agent is done: each out path as declared, where `locate` finds it (without it, at the
 // caller's path), and each share path at the caller's path.
 checkOutputs(run, locate);
 

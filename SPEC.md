@@ -61,22 +61,28 @@ tau takes no arguments and sees no environment variables.
   `^[A-Za-z_][A-Za-z0-9_]*$`, and `type` says what the argument is:
   - `text`: any string, the empty one included.
   - `file` or `dir`: the path of a file or a directory on the caller's side, resolved against the
-    caller's working directory. Its `role` says what the agent does with it:
-    - `in`: reads it. It exists before the run, and the agent leaves it as it is.
-    - `out`: writes it. Its directory exists before the run, and the agent starts without it:
-      what the caller has at the path, if anything, is not shown to the agent, and a successful
-      run replaces it with what the agent wrote.
+    caller's working directory. Its `role` says what the agent does with it, and when:
+    - `in`: reads it. It exists before the run, and the agent sees it as it was when the run
+      started.
+    - `out`: writes it. Its directory exists before the run, and the agent starts with nothing
+      where it sees the path; a successful run replaces what the caller has at the path, if
+      anything, with what the agent wrote.
     - `share`: reads and changes it. It exists before the run, and the agent works on the
       caller's own file or directory, not a copy, so its changes reach the caller as it makes
       them, whether or not the run succeeds.
 
-  No path may be another, or lie inside another, even once symlinks are followed, so that a
-  runtime can place each on its own.
+  Paths may overlap: one may be another, or lie inside it. A caller that passes overlapping paths
+  asks for each role where they meet: an `in` shows the caller's files as they were when the run
+  started, a `share` shows them as they are, and an `out` replaces them once the run has
+  succeeded, the agent's changes to a `share` it holds included. For example, an `in` and an
+  `out` at the same path update a file only if the run succeeds, and an `out` inside a `share`
+  adds a report to the files the agent changes.
 
-  A tau with no `share` path is **functional**: it reads its `in` paths, writes its `out` paths,
-  and changes nothing else of the caller's, so a runtime can run it wherever it can copy those in
-  and out. A tau with a `share` path is **procedural**: it changes the caller's files as it goes,
-  so it runs only where the runtime can give it those files themselves.
+  A tau with no `share` path is **functional**: it needs nothing live from the caller, only its
+  `in` paths as they were and its `out` paths to write, so a runtime can run it wherever it can
+  copy those in and out, including inside another run. A tau with a `share` path is
+  **procedural**: it changes the caller's files as it goes, so it runs only where the runtime can
+  give it those files themselves.
 - **`env`** names the variables of the caller's environment the agent may see. Those the caller
   has not set are left out: what a tau cannot do without, it takes as an argument. What the
   runtime needs for itself, such as a model's credentials or what its implementations use, is not
@@ -175,9 +181,10 @@ How the agent reaches its paths and environment is up to the runtime.
 - **In place**, the agent sees each path where the caller has it, and the caller's environment.
   Nothing keeps it from other files and variables, or from changing an `in` path.
 - **Isolated**, in a sandbox or a container, the runtime places each path where it chooses: an
-  `in` or `out` path by copying or mounting it, and a `share` path by mounting it, since it must
-  stay the caller's own. It gives the agent only the variables `env` names, and may keep the agent
-  from changing its `in` paths.
+  `in` path by copying it, or by mounting it where nothing changes it during the run; an `out`
+  path by copying or mounting it; and a `share` path by mounting it, since it must stay the
+  caller's own. It gives the agent only the variables `env` names, and may keep the agent from
+  changing its `in` paths.
 
 Either way, the prompt names each path where the agent sees it.
 
@@ -198,17 +205,25 @@ and exits with 0 only when the run succeeded.
 
 A runtime keeps to what `tau.json` promises the caller:
 - **Before the run**, each `in` and `share` path is a file or a directory as declared, and each
-  `out` goes into an existing directory, and replaces nothing of the other type. No path is, or
-  lies inside, another. A runtime refuses to start a run whose paths do not fit, or a procedural
-  tau where it cannot give the agent its `share` paths themselves.
+  `out` goes into an existing directory, and replaces nothing of the other type. A runtime
+  refuses to start a run whose paths do not fit, or whose paths it cannot give the agent as
+  their roles promise: the `share` paths of a procedural tau where it cannot give the caller's
+  own, or overlapping paths where it cannot keep each to its role.
+- **When the agent is done**, each `out` and `share` path is a file or a directory as declared,
+  an `out` path where the agent sees it. A runtime reports a run whose paths do not fit as
+  failed.
 - **After a successful run**, each `out` path holds what the agent wrote there, in place of what
-  the caller had, and each `out` and `share` path is a file or a directory as declared. A runtime
-  reports a run whose paths do not fit as failed.
-- **After a failed run**, what the `out` paths hold is up to the runtime, and each `share` path
-  holds what the agent left in it.
+  the caller had, except where another `out` path wins: the runtime puts them in place outermost
+  first, and those at the same path in argv order, so where they overlap, the caller finds the
+  inner, or later, one. Where an outer `out` path left no directory for an inner one, the
+  runtime makes it.
+- **After a failed run**, each `share` path holds what the agent left in it, `out` paths inside
+  it included, and what other `out` paths hold is up to the runtime.
 
-Symlinks are followed, except at an `out` path, which the run replaces. `checkInputs` and
-`checkOutputs` in `@sleepymug/tau` check all of this.
+Symlinks are followed, except at an `out` path, which the run replaces, both when a path's shape
+is checked and when two paths are compared: they overlap when one is, or lies inside, the other.
+`checkInputs` and `checkOutputs` in `@sleepymug/tau` check the shapes, before the run and when
+the agent is done; whether overlapping paths can keep their roles is the runtime's to check.
 
 ## Runtimes
 

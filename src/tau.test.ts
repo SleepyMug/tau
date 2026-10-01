@@ -171,17 +171,15 @@ test("a symlink in what a runtime reads is relative, and stays in the tau", () =
 	});
 });
 
-test("argv must fit the arguments, and no path may be or lie inside another", () => {
+test("argv must fit the arguments, whose paths may overlap", () => {
 	const tau = replace();
 	assert.throws(() => tau.bind(["site"], caller), /expected 5 argument\(s\) \(src, old, new, rules, report\), got 1/);
 	assert.throws(() => tau.bind(["site", "a", "b", "", "r.md"], caller), /rules: a path cannot be empty/);
-	assert.throws(
-		() => tau.bind(["site", "a", "b", "site/rules.md", "r.md"], caller),
-		/rules \(\/home\/u\/site\/rules\.md\) and src \(\/home\/u\/site\) overlap: no path may be, or lie inside, another/,
+	const run = tau.bind(["site", "a", "b", "site/rules.md", "site"], caller);
+	assert.deepEqual(
+		run.paths.map(({ name, host }) => [name, host]),
+		[["src", "/home/u/site"], ["rules", "/home/u/site/rules.md"], ["report", "/home/u/site"]],
 	);
-	assert.throws(() => tau.bind(["/work/x", "a", "b", "s.md", "/work/x"], caller), /report \(\/work\/x\) and src/);
-	// Siblings do not overlap, even when one name starts with the other.
-	tau.bind(["site", "a", "b", "site.md", "site-report.md"], caller);
 });
 
 test("the shapes of inputs and outputs are checked, listing every problem", () => {
@@ -220,22 +218,18 @@ test("the shapes of inputs and outputs are checked, listing every problem", () =
 	assert.throws(() => checkOutputs(run), /src: \S+\/site does not exist/);
 });
 
-test("no path may be, or lie inside, another once symlinks are followed", () => {
+test("paths may overlap, through symlinks too", () => {
 	const home = write("home3", { "site/index.md": "foo", "style.md": "rules" });
 	symlinkSync("site", path.join(home, "link"));
 	symlinkSync("style.md", path.join(home, "rules.md"));
 	const tau = replace();
 	const bind = (...argv: string[]) => tau.bind(argv, { cwd: home, env: {} });
-	// Lexically apart, so `bind` takes them; `checkInputs` follows the symlinks.
-	assert.throws(
-		() => checkInputs(bind("site", "a", "b", "style.md", "link/report.md")),
-		(error: Error) =>
-			error.message ===
-			`the arguments do not fit the tau:\n  report (${home}/link/report.md) and src (${home}/site) overlap once symlinks are followed: ${home}/site/report.md lies inside ${home}/site`,
-	);
-	assert.throws(() => checkInputs(bind("site", "a", "b", "rules.md", "style.md")), /report .* and rules .*: both are \S+\/style\.md$/);
-	// An `out` that is a symlink is replaced, not followed.
+	// A report written into the files the agent changes, and a file read as it was and replaced.
+	checkInputs(bind("site", "a", "b", "style.md", "link/report.md"));
+	checkInputs(bind("site", "a", "b", "rules.md", "style.md"));
+	// An `out` that is a symlink is replaced, not followed, even to something of the other type.
 	checkInputs(bind("site", "a", "b", "style.md", "rules.md"));
+	checkInputs(bind("site", "a", "b", "style.md", "link"));
 });
 
 test("a runtime that works elsewhere checks its outputs there with `locate`", () => {
