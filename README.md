@@ -5,8 +5,9 @@ skills, and, in `api/`, TypeScript declarations of the APIs the agent needs, but
 implementations. A runtime such as pi-run provides an implementation of each API, which programs
 import as `@api/<name>`; how it runs, in the program's process or behind a boundary that keeps
 credentials from the agent, is the runtime's business. Its `tau.json` declares what it takes and
-gives: arguments, environment variables, and the files and directories it reads and writes. How
-they reach the agent is up to the runtime.
+gives: arguments, environment variables, and the files and directories it reads and writes, each
+at its place in the agent's working directory, which the runtime fills before the run and takes
+the outputs from after it.
 
 - [SPEC.md](SPEC.md) specifies the directory, the metadata, the APIs, their implementations, and
   what every runtime keeps to.
@@ -20,21 +21,22 @@ import { checkImplementation, checkInputs, checkOutputs, loadApis, loadTau } fro
 // PROMPT.md and tau.json. A tau.json that breaks the spec, or a prompt naming an undeclared
 // argument, throws, naming its file and the reason; so do symlinks that break the spec.
 const tau = loadTau(agentDir);
-// What it does, and each argument: `text`, or a `file` or `dir` with its `role`, each with its
-// description, for usage or to offer the tau to another agent as a tool.
+// What it does, and each argument: `text`, or a `file` or `dir` with its `role` and its place,
+// `at`, each with its description, for usage or to offer the tau to another agent as a tool.
 tau.description;
 tau.args;
 // Checks argv against the arguments, and computes, without doing it, what the run needs: the
-// prompt with each ${name} expanded, the variables `env` names, and for each path its role, the
-// caller's path, and where the agent sees it. `place` chooses that; without it, the caller's path.
-// ${self} becomes where the agent sees the tau's own directory: `self`, or without it, `tau.dir`.
-const run = tau.bind(argv, { cwd: process.cwd(), env: process.env }, place, self);
+// prompt with each ${name} expanded, the variables `env` names, and for each path its role, its
+// place, the caller's path, and where the agent sees it: its place in `work`, the working
+// directory as the agent sees it. ${self} becomes where the agent sees the tau's own directory:
+// `self`, or without it, `tau.dir`.
+const run = tau.bind(argv, { cwd: process.cwd(), env: process.env }, work, self);
 // Each input a file or a directory as declared, and each output's directory there; paths may
 // overlap. Throws, listing every problem.
 checkInputs(run);
-// ... run the agent on run.prompt, with run.paths and run.env ...
-// When the run ends, if the agent returned normally: each out path as declared, where `locate`
-// finds it (without it, at the caller's path), and each share path at the caller's path.
+// ... fill the working directory, run the agent on run.prompt, with run.env ...
+// When the run ends, if the agent returned normally: what it left at each out's place, as
+// declared, where `locate` finds it (without it, at its view); then put each at the caller's path.
 checkOutputs(run, locate);
 
 // Every api/<name>.d.ts of the tau, once TypeScript finds them and what they import free of
@@ -49,8 +51,8 @@ for (const api of loadApis(agentDir)) {
 }
 ```
 
-Apart from reading the tau and checking its paths, the library does no I/O: mounting, copying and
-running implementations are the runtime's job. It loads TypeScript 6.0 to check APIs, against
+Apart from reading the tau and checking its paths, the library does no I/O: filling the working
+directory, putting the outputs in place and running implementations are the runtime's job. It loads TypeScript 6.0 to check APIs, against
 Node.js 24's types, which it pins: `loadApis` takes about 0.4 s for a tau, and
 `checkImplementation` about 0.15 s.
 

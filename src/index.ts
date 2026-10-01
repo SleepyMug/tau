@@ -8,7 +8,6 @@ export {
 	loadTau,
 	type PathRole,
 	type PathType,
-	type Place,
 	type Run,
 	type Tau,
 } from "./tau.js";

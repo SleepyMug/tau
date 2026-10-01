@@ -46,10 +46,11 @@ tau takes no arguments and sees no environment variables.
 {
   "description": "Replace text in every file of a directory, and report what changed.",
   "args": [
-    { "name": "src",    "type": "dir",  "role": "share", "description": "The files to edit." },
+    { "name": "src",    "type": "dir",  "role": "in",  "at": "site", "description": "The files to edit." },
+    { "name": "edited", "type": "dir",  "role": "out", "at": "site", "description": "Where they go, edited." },
     { "name": "old",    "type": "text", "description": "The text to replace." },
     { "name": "new",    "type": "text", "description": "What to replace it with." },
-    { "name": "rules",  "type": "file", "role": "in" },
+    { "name": "rules",  "type": "file", "role": "in",  "at": "rules.md" },
     { "name": "report", "type": "file", "role": "out" }
   ],
   "env": ["LANG", "TZ"]
@@ -66,37 +67,40 @@ tau takes no arguments and sees no environment variables.
     caller's working directory. Its `role` says what the agent does with it:
     - `in`: reads it. It exists when the run starts.
     - `out`: writes it. The directory it goes in exists when the run starts, and if the agent
-      returns normally, the path exists when the run ends. The agent does not rely on what is at
-      the path before it writes it.
-    - `share`: reads and changes it. It exists when the run starts, and the agent works on the
-      caller's own file or directory, not a copy, so its changes reach the caller as it makes
-      them, whether or not the run succeeds.
+      returns normally, the path exists when the run ends, holding what the agent left for it.
 
-  Paths may overlap: one may be another, or lie inside it. What one shows of another is up to
-  the runtime.
+    Its `at` is its **place**: where the agent finds it, relative to the agent's working
+    directory (see [Running](#running)), as names separated by `/`, none of them empty, `.` or
+    `..`. Without `at`, its place is its name.
 
-  A tau with no `share` path is **functional**: it needs nothing live from the caller, only its
-  `in` paths to read and its `out` paths to write, so a runtime can run it wherever it can copy
-  those in and out, including inside another run. A tau with a `share` path is
-  **procedural**: it changes the caller's files as it goes, so it runs only where the runtime can
-  give it those files themselves.
+  No two paths have the same place, and none lies in another's, but for an `in` and an `out` of
+  the same type, which may share one: that `out` starts as a copy of the `in`, so the agent
+  changes a copy, and what it leaves there is the `out`. Given the same path for both, a run
+  changes the caller's file or directory only if it succeeds.
+
+  The caller's paths may overlap: one may be another, or lie inside it. What one shows of another
+  is up to the runtime.
+
+  A tau needs nothing live from the caller, only its `in` paths to read and its `out` paths to
+  write, so a runtime can run it wherever it can bring those in and out, including inside another
+  run.
 - **`env`** names the variables of the caller's environment the agent may see. Those the caller
   has not set are left out: what a tau cannot do without, it takes as an argument. What the
   runtime needs for itself, such as a model's credentials or what its implementations use, is not
   the tau's to list.
 - Nothing else: an unknown key is refused.
 
-`tau.json` says what the agent reads and writes, not where the agent sees it: that is up to the
-runtime (see Running).
+`tau.json` says what the agent reads and writes, and where in its working directory it finds
+each; where that directory is, is up to the runtime (see Running).
 
 ### Prompt
 
 `PROMPT.md` is the prompt. The runtime replaces each `${name}` with the argument `name`: a text
-argument with its value, and a path with where the agent sees it. It replaces `${self}` with where
-the agent sees the tau's own directory, so the prompt can name what the tau holds beside its
-prompt, such as a file to read or another tau to run. `$${` stands for a literal `${`, and any
-other `${` that is neither `${self}` nor names an argument of `tau.json` is refused. Nothing else
-is expanded, so `$1` or `$@` are text.
+argument with its value, and a path with its place, as the absolute path where the agent sees it.
+It replaces `${self}` with where the agent sees the tau's own directory, so the prompt can name
+what the tau holds beside its prompt, such as a file to read or another tau to run. `$${` stands
+for a literal `${`, and any other `${` that is neither `${self}` nor names an argument of
+`tau.json` is refused. Nothing else is expanded, so `$1` or `$@` are text.
 
 ### APIs
 
@@ -176,24 +180,29 @@ checks this.
 
 ## Running
 
-How the agent reaches its paths, its environment and the tau's own directory is up to the runtime.
-- **In place**, the agent sees each path where the caller has it, the tau's directory where it
-  is, and the caller's environment. Nothing keeps it from other files and variables, or from
-  changing an `in` path or the tau.
-- **Isolated**, in a sandbox or a container, the runtime places each path where it chooses: an
-  `in` or `out` path by copying or mounting it, and a `share` path by mounting it, since it must
-  stay the caller's own. It places the tau's directory too, whole, by copying or mounting it. It
-  gives the agent only the variables `env` names, and may keep the agent from changing its `in`
-  paths or the tau.
+The agent works in a **working directory** of the run's own, where its commands start. When the
+run starts, it holds each path at its place, and nothing else:
+- each `in` path, which the runtime copies there, or links there to the caller's own; but an `in`
+  that shares its place with an `out` is always copied, so the caller's file or directory changes
+  only if the run succeeds;
+- the directory each `out` path goes in, with nothing at the `out`'s own place, unless an `in`
+  shares it.
+
+Where the working directory is, and where the agent sees the tau's directory, whole and never
+inside the working directory, is up to the runtime, and so is what else the agent reaches:
+- **Unisolated**, the agent runs as the caller does, with the caller's environment. Nothing keeps
+  it from other files and variables, or from changing an `in` path the runtime linked, or the tau.
+- **Isolated**, in a sandbox or a container, the runtime gives the agent only the variables `env`
+  names, and may keep it from changing its `in` paths or the tau.
 
 Either way, the prompt names each path, and the tau's directory, where the agent sees it.
 
 ### Results
 
-A run gives back whether it succeeded, the agent's final message, and its `out` paths; its `share`
-paths already hold its changes. Anything else the agent writes is scratch: nothing after the run
-may rely on it, and a runtime may keep it or throw it away. So a tau does not rely on its working
-directory either, which is up to the runtime.
+A run gives back whether it succeeded, the agent's final message, and its `out` paths: once the
+agent returns normally, the runtime puts what it left at each `out`'s place at the caller's path,
+in place of what was there. Anything else the agent writes, in the working directory or elsewhere,
+is scratch: nothing after the run may rely on it, and a runtime may keep it or throw it away.
 
 A run fails when the agent does not return normally, running to the end without being stopped
 or failing, or when its paths do not fit (below). Whether the agent did what it was asked is not the
@@ -204,17 +213,17 @@ and why a run failed to stderr, and exits with 0 only when the run succeeded.
 ### Paths
 
 A runtime keeps to what `tau.json` promises the caller:
-- **When the run starts**, each `in` and `share` path is a file or a directory as declared, and
-  each `out` goes into an existing directory, and is not already something of the other type. A
-  runtime refuses to start a run whose paths do not fit, or a procedural tau where it cannot
-  give the agent the caller's own `share` paths.
-- **When the run ends**, if the agent returned normally, each `out` and `share` path is a file
-  or a directory as declared. A runtime reports a run whose paths do not fit as failed.
+- **When the run starts**, each `in` path is a file or a directory as declared, and each `out`
+  goes into an existing directory, and is not already something of the other type. A runtime
+  refuses to start a run whose paths do not fit.
+- **When the run ends**, if the agent returned normally, what it left at each `out`'s place is a
+  file or a directory as declared, and is then at the caller's path. A runtime reports a run whose
+  paths do not fit as failed, and puts none of its `out` paths in place; nor does a run that
+  failed otherwise.
 
-Nothing else is promised: what an `in` path holds once the run has started, what an `out` path
-holds before the agent writes it or beside what it wrote, and what a failed run leaves at an
-`out` path are up to the runtime. Symlinks are followed. `checkInputs` and `checkOutputs` in
-`@sleepymug/tau` check the paths' shapes.
+Nothing else is promised: what an `in` path holds once the run has started is up to the runtime.
+Symlinks are followed. `checkInputs` and `checkOutputs` in `@sleepymug/tau` check the paths'
+shapes.
 
 ## Runtimes
 

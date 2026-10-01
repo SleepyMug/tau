@@ -9,18 +9,27 @@ export type PathType = "file" | "dir";
  * What the agent does with a path argument (SPEC.md):
  * - `in`: reads it; it exists when the run starts;
  * - `out`: writes it; the directory it goes in exists when the run starts, and if the agent returns
- *   normally, it exists when the run ends;
- * - `share`: reads and changes the caller's own, not a copy, so its changes reach the caller as it
- *   makes them, whether or not the run succeeds.
+ *   normally, it exists when the run ends, holding what the agent left at its place.
  *
- * Paths may overlap. A tau with no `share` path is functional; one with any is procedural.
+ * The caller's paths may overlap.
  */
-export type PathRole = "in" | "out" | "share";
+export type PathRole = "in" | "out";
 
-/** An argument as `tau.json` declares it: tagged by `type`, and only a path has a `role`. */
+/**
+ * An argument as `tau.json` declares it: tagged by `type`, and only a path has a `role`, and an `at`,
+ * its place: where the agent finds it, relative to its working directory; by default, its name. No
+ * two places are the same, and none lies in another, but for an `in` and an `out` of the same type,
+ * which may share one, the `out` starting as a copy of the `in`.
+ */
 export type Arg =
 	| { readonly name: string; readonly type: "text"; readonly description: string | undefined }
-	| { readonly name: string; readonly type: PathType; readonly role: PathRole; readonly description: string | undefined };
+	| {
+			readonly name: string;
+			readonly type: PathType;
+			readonly role: PathRole;
+			readonly at: string;
+			readonly description: string | undefined;
+	  };
 
 /** A tau's prompt and what it takes and gives: `PROMPT.md` and `tau.json`. */
 export interface Tau {
@@ -34,11 +43,11 @@ export interface Tau {
 	/** The variables of the caller's environment the agent may see. */
 	readonly env: readonly string[];
 	/**
-	 * One run: `argv` checked against `args`, and the prompt expanded, with each path where `place`
-	 * puts it; by default, where the caller's path is; and `${self}` where the agent sees the tau's
-	 * own directory, `self`; by default, `dir`. Throws TypeError.
+	 * One run: `argv` checked against `args`, and the prompt expanded, with each path at its place in
+	 * `work`, the working directory as the agent sees it, which is absolute; and `${self}` where the
+	 * agent sees the tau's own directory, `self`; by default, `dir`. Throws TypeError.
 	 */
-	bind(argv: readonly string[], caller: Caller, place?: Place, self?: string): Run;
+	bind(argv: readonly string[], caller: Caller, work: string, self?: string): Run;
 }
 
 /** Who runs the tau. */
@@ -47,9 +56,6 @@ export interface Caller {
 	readonly cwd: string;
 	readonly env: Readonly<Record<string, string | undefined>>;
 }
-
-/** Where the agent sees a path: the runtime's choice. */
-export type Place = (path: Omit<BoundPath, "view">) => string;
 
 /** What a runtime needs to set up one run: computed, not done. */
 export interface Run {
@@ -68,9 +74,11 @@ export interface BoundPath {
 	readonly name: string;
 	readonly type: PathType;
 	readonly role: PathRole;
+	/** Its place, relative to the working directory. */
+	readonly at: string;
 	/** The caller's path, absolute. */
 	readonly host: string;
-	/** Where the agent sees it. */
+	/** Where the agent sees it: its place in the working directory. */
 	readonly view: string;
 }
 
@@ -78,7 +86,7 @@ const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 /** What `${self}` names in a prompt: the tau's own directory, so no argument has this name. */
 const SELF = "self";
 const TYPES: readonly string[] = ["text", "file", "dir"] satisfies Arg["type"][];
-const ROLES: readonly string[] = ["in", "out", "share"] satisfies PathRole[];
+const ROLES: readonly string[] = ["in", "out"] satisfies PathRole[];
 /** `$${` is a literal `${`; any other `${` must be `${self}` or a `${name}` of a declared argument. */
 const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
 
@@ -112,7 +120,8 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		args,
 		env,
-		bind(argv, caller, place = ({ host }) => host, self = absolute) {
+		bind(argv, caller, work, self = absolute) {
+			if (!path.isAbsolute(work)) throw new TypeError(`the working directory must be an absolute path: ${work}`);
 			if (argv.length !== args.length) {
 				const names = args.length === 0 ? "" : ` (${args.map((arg) => arg.name).join(", ")})`;
 				throw new TypeError(`expected ${args.length} argument(s)${names}, got ${argv.length}`);
@@ -126,9 +135,8 @@ export function loadTau(dir: string): Tau {
 					return;
 				}
 				if (value === "") throw new TypeError(`${arg.name}: a path cannot be empty`);
-				const bound = { name: arg.name, type: arg.type, role: arg.role, host: path.resolve(caller.cwd, value) };
-				const view = place(bound);
-				paths.push({ ...bound, view });
+				const view = path.join(work, arg.at);
+				paths.push({ name: arg.name, type: arg.type, role: arg.role, at: arg.at, host: path.resolve(caller.cwd, value), view });
 				values.set(arg.name, view);
 			});
 			const set = env.flatMap((name) => {
@@ -141,14 +149,14 @@ export function loadTau(dir: string): Tau {
 }
 
 /**
- * Before a run: whether the caller's paths fit the tau. Each `in` and `share` path is a file or a
- * directory as declared; each `out` goes into an existing directory, and is not there yet, or is
- * of its own type. Symlinks are followed, and paths may overlap. Throws, listing every problem.
+ * Before a run: whether the caller's paths fit the tau. Each `in` path is a file or a directory as
+ * declared; each `out` goes into an existing directory, and is not there yet, or is of its own
+ * type. Symlinks are followed, and paths may overlap. Throws, listing every problem.
  */
 export function checkInputs(run: Run): void {
 	const problems: string[] = [];
 	for (const { name, type, role, host } of run.paths) {
-		if (role !== "out") {
+		if (role === "in") {
 			const problem = shapeProblem(host, type);
 			if (problem !== undefined) problems.push(`${name}: ${host} ${problem}`);
 			continue;
@@ -166,17 +174,17 @@ export function checkInputs(run: Run): void {
 }
 
 /**
- * When the run ends, if the agent returned normally: whether it left what the tau declares. Each `out` path is a file
- * or a directory as declared where `locate` finds it: by default the caller's path, which is right
- * for a runtime that runs the agent in place; one that works elsewhere checks its `out` paths where
- * it has them, before it brings them back. Each `share` path is one where the caller has it, since
- * the agent worked on the caller's own. Throws, listing every problem.
+ * When the run ends, if the agent returned normally: whether it left what the tau declares, before
+ * the runtime puts its `out` paths in place. Each `out` path is a file or a directory as declared
+ * where `locate` finds what the agent left at its place: by default its view, which is right for a
+ * runtime whose agent works on the runtime's own machine; one whose agent works elsewhere, such as
+ * in a container, checks a copy. Throws, listing every problem.
  */
-export function checkOutputs(run: Run, locate: (path: BoundPath) => string = ({ host }) => host): void {
+export function checkOutputs(run: Run, locate: (path: BoundPath) => string = ({ view }) => view): void {
 	const problems: string[] = [];
 	for (const bound of run.paths) {
 		if (bound.role === "in") continue;
-		const at = bound.role === "share" ? bound.host : locate(bound);
+		const at = locate(bound);
 		const problem = shapeProblem(at, bound.type);
 		if (problem !== undefined) problems.push(`${bound.name}: ${at} ${problem}`);
 	}
@@ -210,6 +218,13 @@ function readMetadata(file: string): {
 			if (names.has(name)) throw new TypeError(`two arguments are named ${name}`);
 			names.add(name);
 		}
+		const paths = declared.filter((arg) => arg.type !== "text");
+		for (const [index, path] of paths.entries()) {
+			for (const other of paths.slice(index + 1)) {
+				const problem = placesProblem(path, other);
+				if (problem !== undefined) throw new TypeError(problem);
+			}
+		}
 
 		const variables = new Set<string>();
 		for (const name of env) {
@@ -227,7 +242,7 @@ function readMetadata(file: string): {
 
 function readArg(value: unknown, index: number): Arg {
 	if (!isObject(value)) throw new TypeError(`args[${index}] must be an object`);
-	const { name, type, role, description, ...rest } = value;
+	const { name, type, role, at, description, ...rest } = value;
 	if (typeof name !== "string" || !NAME.test(name))
 		throw new TypeError(`args[${index}] needs a \`name\` matching ${NAME.source}`);
 	if (name === SELF) throw new TypeError(`args[${index}]: \`${SELF}\` names the tau's own directory, so no argument has that name`);
@@ -239,12 +254,35 @@ function readArg(value: unknown, index: number): Arg {
 		throw new TypeError(`${name}: \`type\` ${JSON.stringify(type)} is not one of ${TYPES.join(", ")}`);
 	if (type === "text") {
 		if (role !== undefined) throw new TypeError(`${name}: a text argument has no \`role\``);
+		if (at !== undefined) throw new TypeError(`${name}: a text argument has no \`at\``);
 		return { name, type, description };
 	}
 	if (role === undefined) throw new TypeError(`${name}: a ${type} needs a \`role\`, one of ${ROLES.join(", ")}`);
 	if (typeof role !== "string" || !ROLES.includes(role))
 		throw new TypeError(`${name}: \`role\` ${JSON.stringify(role)} is not one of ${ROLES.join(", ")}`);
-	return { name, type: type as PathType, role: role as PathRole, description };
+	if (at !== undefined && (typeof at !== "string" || !isPlace(at)))
+		throw new TypeError(
+			`${name}: \`at\` ${JSON.stringify(at)} is not a relative path of names separated by /, none of them empty, . or ..`,
+		);
+	return { name, type: type as PathType, role: role as PathRole, at: at ?? name, description };
+}
+
+/** Whether `at` is a place: names separated by `/`, none of them empty, `.` or `..`. */
+function isPlace(at: string): boolean {
+	return at.split("/").every((part) => part !== "" && part !== "." && part !== ".." && !part.includes("\0"));
+}
+
+type PathArg = Extract<Arg, { readonly at: string }>;
+
+/** Why two paths cannot have their places, if they cannot: only an `in` and an `out` of one type share one. */
+function placesProblem(a: PathArg, b: PathArg): string | undefined {
+	if (a.at === b.at) {
+		if (a.role !== b.role && a.type === b.type) return undefined;
+		return `${a.name} and ${b.name} are both at ${a.at}, where only an in and an out of the same type may be`;
+	}
+	const [outer, inner] = b.at.startsWith(`${a.at}/`) ? [a, b] : a.at.startsWith(`${b.at}/`) ? [b, a] : [];
+	if (outer === undefined || inner === undefined) return undefined;
+	return `${inner.name} is at ${inner.at}, inside ${outer.name}'s place ${outer.at}`;
 }
 
 /** A prompt as text around placeholders: `text` has one more entry than `names`. */
