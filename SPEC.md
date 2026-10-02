@@ -73,10 +73,12 @@ tau takes no arguments and sees no environment variables.
     directory (see [Running](#running)), as names separated by `/`, none of them empty, `.` or
     `..`. Without `at`, its place is its name.
 
-  No two paths have the same place, and none lies in another's, but for an `in` and an `out` of
-  the same type, which may share one: that `out` starts as a copy of the `in`, so the agent
-  changes a copy, and what it leaves there is the `out`. Given the same path for both, a run
-  changes the caller's file or directory only if it succeeds.
+  No two paths have the same place, but for an `in` and an `out` of the same type, which may
+  share one: that `out` starts as a copy of the `in`, so the agent changes a copy, and what it
+  leaves there is the `out`. Given the same path for both, a run changes the caller's file or
+  directory only if it succeeds. A place may lie in another's, unless that one is a file's: the
+  inner one wins, so the agent finds an inner `in` at its place in place of what an outer one
+  holds there.
 
   The caller's paths may overlap: one may be another, or lie inside it. What one shows of another
   is up to the runtime.
@@ -182,11 +184,11 @@ checks this.
 
 The agent works in a **working directory** of the run's own, where its commands start. When the
 run starts, it holds each path at its place, and nothing else:
-- each `in` path, which the runtime copies there, or links there to the caller's own; but an `in`
-  that shares its place with an `out` is always copied, so the caller's file or directory changes
-  only if the run succeeds;
-- the directory each `out` path goes in, with nothing at the `out`'s own place, unless an `in`
-  shares it.
+- each `in` path, which the runtime copies there, or links there to the caller's own; an inner one
+  in place of what an outer one holds there; and one that shares its place with an `out` always
+  copied, so the caller's file or directory changes only if the run succeeds;
+- the directory each `out` path goes in, and at the `out`'s own place, what the `in` paths put
+  there, if anything.
 
 Where the working directory is, and where the agent sees the tau's directory, whole and never
 inside the working directory, is up to the runtime, and so is what else the agent reaches:
@@ -215,7 +217,9 @@ and why a run failed to stderr, and exits with 0 only when the run succeeded.
 A runtime keeps to what `tau.json` promises the caller:
 - **When the run starts**, each `in` path is a file or a directory as declared, and each `out`
   goes into an existing directory, and is not already something of the other type. A runtime
-  refuses to start a run whose paths do not fit.
+  refuses to start a run whose paths do not fit, or a tau whose places it cannot give, as one
+  that links `in` paths cannot give places that lie in one another without the agent writing to
+  the caller's own files.
 - **When the run ends**, if the agent returned normally, what it left at each `out`'s place is a
   file or a directory as declared, and is then at the caller's path. A runtime reports a run whose
   paths do not fit as failed, and puts none of its `out` paths in place; nor does a run that

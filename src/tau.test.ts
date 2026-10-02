@@ -68,6 +68,27 @@ Then write each changed file, and how many replacements it got, to /work/report.
 	assert.throws(() => tau.bind(ARGV, caller, "work"), /the working directory must be an absolute path: work/);
 });
 
+test("places may lie in a directory's", () => {
+	const tau = loadTau(
+		write("nested", {
+			"PROMPT.md": "Build ${src} into ${dist}, with ${config}.",
+			"tau.json": {
+				args: [
+					{ name: "src", type: "dir", role: "in" },
+					{ name: "config", type: "file", role: "in", at: "src/config.json" },
+					{ name: "dist", type: "dir", role: "out", at: "src/dist" },
+				],
+			},
+		}),
+	);
+	const run = tau.bind(["repo", "local.json", "out"], caller, "/work");
+	assert.equal(run.prompt, "Build /work/src into /work/src/dist, with /work/src/config.json.");
+	assert.deepEqual(
+		run.paths.map(({ name, view }) => [name, view]),
+		[["src", "/work/src"], ["config", "/work/src/config.json"], ["dist", "/work/src/dist"]],
+	);
+});
+
 test("a tau without tau.json takes no arguments and sees no variables", () => {
 	const tau = loadTau(write("plain", { "PROMPT.md": "Say hi. Costs $1, and $${x} stays as it is." }));
 	assert.deepEqual([tau.description, tau.args, tau.env], [undefined, [], []]);
@@ -113,9 +134,9 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 			/a and b are both at a, where/,
 		],
 		[
-			"inside",
-			{ args: [{ name: "a", type: "dir", role: "out", at: "x/y" }, { name: "b", type: "dir", role: "in", at: "x" }] },
-			/a is at x\/y, inside b's place x/,
+			"infile",
+			{ args: [{ name: "a", type: "dir", role: "out", at: "x/y" }, { name: "b", type: "file", role: "in", at: "x" }] },
+			/a is at x\/y, inside b's place x, which is a file/,
 		],
 		["argdescription", { args: [{ name: "a", type: "text", description: 1 }] }, /a: `description` must be a string/],
 		["argkey", { args: [{ name: "a", type: "file", role: "in", readonly: true }] }, /a: unknown key "readonly"/],

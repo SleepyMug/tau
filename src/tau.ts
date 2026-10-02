@@ -18,8 +18,9 @@ export type PathRole = "in" | "out";
 /**
  * An argument as `tau.json` declares it: tagged by `type`, and only a path has a `role`, and an `at`,
  * its place: where the agent finds it, relative to its working directory; by default, its name. No
- * two places are the same, and none lies in another, but for an `in` and an `out` of the same type,
- * which may share one, the `out` starting as a copy of the `in`.
+ * two places are the same, but for an `in` and an `out` of the same type, which may share one, the
+ * `out` starting as a copy of the `in`. A place may lie in another's, but not in a file's: the inner
+ * one wins.
  */
 export type Arg =
 	| { readonly name: string; readonly type: "text"; readonly description: string | undefined }
@@ -274,15 +275,18 @@ function isPlace(at: string): boolean {
 
 type PathArg = Extract<Arg, { readonly at: string }>;
 
-/** Why two paths cannot have their places, if they cannot: only an `in` and an `out` of one type share one. */
+/**
+ * Why two paths cannot have their places, if they cannot: only an `in` and an `out` of one type share
+ * one, and nothing lies in a file's.
+ */
 function placesProblem(a: PathArg, b: PathArg): string | undefined {
 	if (a.at === b.at) {
 		if (a.role !== b.role && a.type === b.type) return undefined;
 		return `${a.name} and ${b.name} are both at ${a.at}, where only an in and an out of the same type may be`;
 	}
 	const [outer, inner] = b.at.startsWith(`${a.at}/`) ? [a, b] : a.at.startsWith(`${b.at}/`) ? [b, a] : [];
-	if (outer === undefined || inner === undefined) return undefined;
-	return `${inner.name} is at ${inner.at}, inside ${outer.name}'s place ${outer.at}`;
+	if (outer === undefined || inner === undefined || outer.type === "dir") return undefined;
+	return `${inner.name} is at ${inner.at}, inside ${outer.name}'s place ${outer.at}, which is a file`;
 }
 
 /** A prompt as text around placeholders: `text` has one more entry than `names`. */
