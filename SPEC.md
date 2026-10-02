@@ -4,7 +4,8 @@ A tau is an agent packaged as a directory. Like a program, it declares the APIs 
 TypeScript declarations, but it never contains their implementations or any credentials. It also
 declares what it takes and gives: its arguments, the environment variables it may see, and the
 files and directories it reads and writes. A **runtime** such as pi-run executes the tau, provides
-an implementation of each of its APIs, and presents them to the model in whatever way it chooses.
+an implementation of each of its APIs, and presents what the tau exposes to the model in whatever
+way it chooses: its APIs, or packages of its own built on them.
 
 An API is an abstraction boundary, not a security one. It says what the agent's programs can call,
 and what they get back, in whatever TypeScript can declare. How a call is carried out is the
@@ -25,17 +26,18 @@ my-agent/
 ├── PROMPT.md            # required: the prompt, naming each argument as ${name}
 ├── tau.json             # optional: what it does, and what it takes and gives
 ├── skills/              # optional: skills (any dir with SKILL.md, recursively)
-└── api/                 # optional: the APIs the agent needs, one declaration file each
-    ├── notes.d.ts
-    └── shared/          # optional: anything the API files import
+├── api/                 # optional: the APIs the agent needs, one declaration file each
+│   ├── notes.d.ts
+│   └── shared/          # optional: anything the API files import
+└── node_modules/        # optional: packages of the tau's own, built on its APIs
 ```
 
 A tau is self-contained, so that it can be moved or copied as a whole. What a runtime reads of it
-(PROMPT.md, tau.json, skills/ and api/) may hold symlinks, but only relative ones, each leading,
-through any further symlinks, all relative, to something that exists in the tau. Runtimes keep
-symlinks as they are. Anything else in the directory, such as the sources of its skills, or a tau
-it runs, is the author's: no runtime reads it, though the agent may, where `${self}` names the
-directory (see [Prompt](#prompt)).
+(PROMPT.md, tau.json, skills/ and api/, and node_modules/ when the tau exposes a package of its
+own) may hold symlinks, but only relative ones, each leading, through any further symlinks, all
+relative, to something that exists in the tau. Runtimes keep symlinks as they are. Anything else in
+the directory, such as the sources of its skills, or a tau it runs, is the author's: no runtime
+reads it, though the agent may, where `${self}` names the directory (see [Prompt](#prompt)).
 
 ### Metadata
 
@@ -53,7 +55,8 @@ tau takes no arguments and sees no environment variables.
     { "name": "rules",  "type": "file", "role": "in",  "at": "rules.md" },
     { "name": "report", "type": "file", "role": "out" }
   ],
-  "env": ["LANG", "TZ"]
+  "env": ["LANG", "TZ"],
+  "exposes": ["@api/file-edits"]
 }
 ```
 
@@ -90,6 +93,9 @@ tau takes no arguments and sees no environment variables.
   has not set are left out: what a tau cannot do without, it takes as an argument. What the
   runtime needs for itself, such as a model's credentials or what its implementations use, is not
   the tau's to list.
+- **`exposes`** names what the agent's programs import, each at most once: an API, as
+  `@api/<name>`, or a package of the tau's own, by its name (see [Packages](#packages)). Without
+  it, they import every API.
 - Nothing else: an unknown key is refused.
 
 `tau.json` says what the agent reads and writes, and where in its working directory it finds
@@ -155,7 +161,36 @@ TypeScript asks of such a file, a tau asks only that it hold what the file impor
   `@packageDocumentation`, describes the API. Programs, and the agent, learn an API from its
   declarations and their doc comments.
 
+`@api/` is the runtime's: no `node_modules/` in the tau holds an `@api` scope, which would hide the
+runtime's implementation (see [Implementations](#implementations)). Wherever the tau's own code
+imports `@api/<name>`, its declarations are `api/<name>.d.ts`, as a `tsconfig.json` beside them
+with `"paths": { "@api/*": ["./api/*.d.ts"] }` has it.
+
 `loadApis` in `@sleepymug/tau` checks all of this.
+
+### Packages
+
+A tau may hold packages of its own in `node_modules/`, as Node.js finds them, built on its APIs:
+code that its author, or a tool that tunes agents, puts between the APIs and the model, such as a
+function that makes several calls in one, so that the model can do more with less. `exposes`
+names those the agent's programs import; the packages may import the APIs, and anything else in
+the tau's `node_modules/`, whether `exposes` names it or not.
+
+- **It is JavaScript, with declarations.** A package `exposes` names is at
+  `node_modules/<name>`, runs on Node.js 24 or later, and has TypeScript declarations of what
+  programs import of it.
+- **It type-checks.** Its declarations, and what they import, are checked as API files are, with
+  `@api/<name>` typed by `api/<name>.d.ts`, so that it is built on the APIs as the tau declares
+  them, not on an implementation. TypeScript must find no errors in the package's own files, and
+  every import in the files it reaches resolves. The types of the packages it uses are taken as
+  they are.
+- **It is self-contained.** Each import, in its declarations and its JavaScript, resolves to a file
+  in the tau, to Node.js's own modules, or, as `@api/<name>`, to an API the tau declares.
+- **Documentation:** the first doc comment of its declarations, if it has `@packageDocumentation`,
+  or else its `package.json`'s `description`, describes it.
+
+`loadExposed` in `@sleepymug/tau` checks what `exposes` names, and the packages' declarations; their
+JavaScript is the author's to keep to this.
 
 ### Implementations
 
@@ -166,13 +201,18 @@ module type, `typeof import(implementation)`, assignable to the API's: each valu
 the implementation exports too, with a type that fits. `checkImplementation` in `@sleepymug/tau`
 checks this.
 
-- **An API is written for its agent.** It declares what the agent's programs use, with documentation
-  written for the agent, and may declare less than an implementation offers. One implementation can
-  serve every tau whose API it fits. Since the check is TypeScript's, a class with `private` members
-  fits only its own declaration, so an API declares what programs use of a class, and leaves its
-  private members out.
-- **Programs see the API.** `@api/<name>` is typed by `api/<name>.d.ts` as the tau has it, with its
-  imports resolving as they do there, whatever else the implementation declares.
+- **An API is written for the tau.** It declares what the tau's code, the agent's programs and the
+  tau's packages, uses, with documentation written for whoever reads it, and may declare less than
+  an implementation offers. One implementation can serve every tau whose API it fits. Since the
+  check is TypeScript's, a class with `private` members fits only its own declaration, so an API
+  declares what the tau's code uses of a class, and leaves its private members out.
+- **The tau's code sees the API.** `@api/<name>` is typed by `api/<name>.d.ts` as the tau has it,
+  with its imports resolving as they do there, whatever else the implementation declares.
+- **Every import gets the same implementation.** Wherever an agent's program or a package of the
+  tau imports `@api/<name>`, it gets the runtime's implementation, one module for all of them in a
+  process. A runtime can give it with a `node_modules/` of its own in a directory above the tau's,
+  holding a package `@api/<name>` for each API, since Node.js looks for a package in every
+  directory above the file that imports it.
 - **How an implementation runs is the runtime's business.** It may run in the program's process, or
   be split in two: a part there, which calls, over a socket or any other channel, a part that holds
   credentials or reaches beyond the agent's environment. The agent can read and change whatever
@@ -231,5 +271,7 @@ shapes.
 
 ## Runtimes
 
-How APIs reach the model is up to the runtime. For example, pi-run gives the model a TypeScript
-`execute` tool. The programs it runs import each API as `@api/<name>`, typed by its declarations.
+How what a tau exposes reaches the model is up to the runtime. For example, pi-run gives the model
+a TypeScript `execute` tool. The programs it runs import each API as `@api/<name>`, typed by its
+declarations. Like an API, `exposes` is an abstraction boundary, not a security one: a runtime
+presents what it names, and may let programs import more, such as an API the tau does not expose.

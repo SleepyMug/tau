@@ -142,6 +142,9 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 		["argkey", { args: [{ name: "a", type: "file", role: "in", readonly: true }] }, /a: unknown key "readonly"/],
 		["envname", { env: ["A-B"] }, /`env`: "A-B" is not a variable name/],
 		["envtwice", { env: ["A", "A"] }, /`env` lists A twice/],
+		["exposes", { exposes: "notes-kit" }, /`exposes` must be an array/],
+		["exposesname", { exposes: ["notes-kit/sub"] }, /`exposes`: "notes-kit\/sub" is not a package's name/],
+		["exposestwice", { exposes: ["@api/notes", "@api/notes"] }, /`exposes` lists @api\/notes twice/],
 	];
 	for (const [name, json, reason] of refused) {
 		const files = { "PROMPT.md": "hi", "tau.json": typeof json === "string" ? json : JSON.stringify(json) };

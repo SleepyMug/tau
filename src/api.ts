@@ -27,7 +27,7 @@ const require = createRequire(import.meta.url);
 const NODE_TYPES = path.dirname(path.dirname(require.resolve("@types/node/package.json")));
 
 /** How API files are checked: strict, as Node.js resolves imports, on ES2022 and Node.js's types. */
-const OPTIONS: ts.CompilerOptions = {
+export const OPTIONS: ts.CompilerOptions = {
 	target: ts.ScriptTarget.ES2022,
 	lib: ["lib.es2022.d.ts"],
 	module: ts.ModuleKind.NodeNext,
@@ -150,7 +150,7 @@ function importPath(from: string, file: string): string {
  * The description in a declaration file's TSDoc package documentation: its first doc comment, when
  * that comment has the `@packageDocumentation` tag, up to any other tag.
  */
-function packageDescription(text: string): string | undefined {
+export function packageDescription(text: string): string | undefined {
 	for (const range of ts.getLeadingCommentRanges(text, 0) ?? []) {
 		const comment = text.slice(range.pos, range.end);
 		if (!comment.startsWith("/**")) continue;
@@ -168,7 +168,7 @@ function packageDescription(text: string): string | undefined {
 }
 
 /** A compiler host that serves `files` from memory and everything else from disk. */
-function memoryHost(files: ReadonlyMap<string, string>): ts.CompilerHost {
+export function memoryHost(files: ReadonlyMap<string, string>): ts.CompilerHost {
 	const host = ts.createCompilerHost(OPTIONS);
 	const base = { getSourceFile: host.getSourceFile, fileExists: host.fileExists, readFile: host.readFile };
 	host.getSourceFile = (name, version, onError) => {
@@ -181,13 +181,13 @@ function memoryHost(files: ReadonlyMap<string, string>): ts.CompilerHost {
 }
 
 /** `file:line:column: message`, with `where` naming the file. */
-function format(diagnostic: ts.Diagnostic, where: (file: string) => string): string {
+export function format(diagnostic: ts.Diagnostic, where: (file: string) => string): string {
 	const { file, start } = diagnostic;
 	if (file === undefined || start === undefined) return message(diagnostic);
 	const { line, character } = file.getLineAndCharacterOfPosition(start);
 	return `${where(file.fileName)}:${line + 1}:${character + 1}: ${message(diagnostic)}`;
 }
 
-function message(diagnostic: ts.Diagnostic): string {
+export function message(diagnostic: ts.Diagnostic): string {
 	return ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n    ");
 }

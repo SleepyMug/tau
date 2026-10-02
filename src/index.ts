@@ -1,4 +1,5 @@
 export { API_SCOPE, type Api, checkImplementation, loadApis } from "./api.js";
+export { type Exposed, loadExposed } from "./exposed.js";
 export {
 	type Arg,
 	type BoundPath,

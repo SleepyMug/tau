@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { API_SCOPE } from "./api.js";
 import { linkProblems } from "./links.js";
 
 /** What a path argument names on the caller's side. */
@@ -44,6 +45,12 @@ export interface Tau {
 	/** The variables of the caller's environment the agent may see. */
 	readonly env: readonly string[];
 	/**
+	 * What the agent's programs import, as tau.json lists it: an API, as `@api/<name>`, or a package
+	 * of the tau's own, by its name; undefined without the list, when they import every API.
+	 * `loadExposed` checks it against the tau.
+	 */
+	readonly exposes: readonly string[] | undefined;
+	/**
 	 * One run: `argv` checked against `args`, and the prompt expanded, with each path at its place in
 	 * `work`, the working directory as the agent sees it, which is absolute; and `${self}` where the
 	 * agent sees the tau's own directory, `self`; by default, `dir`. Throws TypeError.
@@ -84,6 +91,8 @@ export interface BoundPath {
 }
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+/** What `exposes` lists: a package's name, scoped or not, as programs import it. */
+const PACKAGE = /^(?:@[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*$/u;
 /** What `${self}` names in a prompt: the tau's own directory, so no argument has this name. */
 const SELF = "self";
 const TYPES: readonly string[] = ["text", "file", "dir"] satisfies Arg["type"][];
@@ -95,8 +104,9 @@ const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
  * The tau at `dir`: its PROMPT.md, and its tau.json if it has one (without it, the tau takes no
  * arguments and sees no variables). Throws, naming the file and the reason, when tau.json breaks
  * the spec or the prompt names an argument tau.json does not declare, and, listing every one, for
- * a symlink that breaks the spec in what a runtime reads. APIs are loaded separately, with
- * `loadApis`.
+ * a symlink that breaks the spec in what a runtime reads, node_modules/ included when the tau
+ * exposes a package of its own. APIs are loaded separately, with `loadApis`, and what the tau
+ * exposes is checked against them with `loadExposed`.
  */
 export function loadTau(dir: string): Tau {
 	const absolute = path.resolve(dir);
@@ -104,7 +114,7 @@ export function loadTau(dir: string): Tau {
 	if (!existsSync(promptFile)) throw new Error(`${absolute}: not a tau (no PROMPT.md)`);
 	const metadataFile = path.join(absolute, "tau.json");
 	const metadata = existsSync(metadataFile) ? readMetadata(metadataFile) : undefined;
-	const { description, args = [], env = [] } = metadata ?? {};
+	const { description, args = [], env = [], exposes } = metadata ?? {};
 	const prompt = readFileSync(promptFile, "utf8");
 	let template: Template;
 	try {
@@ -112,7 +122,7 @@ export function loadTau(dir: string): Tau {
 	} catch (error) {
 		throw new Error(`${promptFile}: ${messageOf(error)}`);
 	}
-	const problems = linkProblems(absolute);
+	const problems = linkProblems(absolute, exposes?.some((specifier) => !specifier.startsWith(API_SCOPE)) ?? false);
 	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
 
 	return {
@@ -121,6 +131,7 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		args,
 		env,
+		exposes,
 		bind(argv, caller, work, self = absolute) {
 			if (!path.isAbsolute(work)) throw new TypeError(`the working directory must be an absolute path: ${work}`);
 			if (argv.length !== args.length) {
@@ -197,6 +208,7 @@ function readMetadata(file: string): {
 	description: string | undefined;
 	args: Arg[];
 	env: string[];
+	exposes: string[] | undefined;
 } {
 	try {
 		let json: unknown;
@@ -206,12 +218,13 @@ function readMetadata(file: string): {
 			throw new TypeError(`is not JSON: ${messageOf(error)}`);
 		}
 		if (!isObject(json)) throw new TypeError("must be an object");
-		const { description, args = [], env = [], ...rest } = json;
+		const { description, args = [], env = [], exposes, ...rest } = json;
 		refuseKeys(rest, "tau.json");
 		if (description !== undefined && typeof description !== "string")
 			throw new TypeError("`description` must be a string");
 		if (!Array.isArray(args)) throw new TypeError("`args` must be an array");
 		if (!Array.isArray(env)) throw new TypeError("`env` must be an array");
+		if (exposes !== undefined && !Array.isArray(exposes)) throw new TypeError("`exposes` must be an array");
 
 		const declared = args.map(readArg);
 		const names = new Set<string>();
@@ -235,7 +248,15 @@ function readMetadata(file: string): {
 			variables.add(name);
 		}
 
-		return { description, args: declared, env: [...variables] };
+		const exposed = new Set<string>();
+		for (const specifier of exposes ?? []) {
+			if (typeof specifier !== "string" || !PACKAGE.test(specifier))
+				throw new TypeError(`\`exposes\`: ${JSON.stringify(specifier)} is not a package's name`);
+			if (exposed.has(specifier)) throw new TypeError(`\`exposes\` lists ${specifier} twice`);
+			exposed.add(specifier);
+		}
+
+		return { description, args: declared, env: [...variables], exposes: exposes === undefined ? undefined : [...exposed] };
 	} catch (error) {
 		throw new Error(`${file}: ${messageOf(error)}`);
 	}
