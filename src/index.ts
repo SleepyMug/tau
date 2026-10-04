@@ -1,14 +1,17 @@
 export { API_SCOPE, type Api, checkImplementation, loadApis } from "./api.js";
 export { type Exposed, loadExposed } from "./exposed.js";
 export {
-	type Arg,
-	type BoundPath,
+	type BoundHandle,
 	type Caller,
 	checkInputs,
 	checkOutputs,
+	type Handle,
+	type Kind,
 	loadTau,
-	type PathRole,
-	type PathType,
+	type Mode,
+	type Placing,
 	type Run,
 	type Tau,
+	type Type,
+	type Value,
 } from "./tau.js";

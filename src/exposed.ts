@@ -1,11 +1,11 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { API_SCOPE, type Api, format, memoryHost, message, OPTIONS, packageDescription } from "./api.js";
+import { API_SCOPE, type Api, apiPaths, format, memoryHost, message, OPTIONS, packageDescription } from "./api.js";
 import { inside } from "./links.js";
 import type { Tau } from "./tau.js";
 
-/** What a tau exposes to the agent's programs (SPEC.md): one of its APIs, or a package of its own. */
+/** What a tau exposes to the agent's programs (docs/spec/packages.md): one of its APIs, or a package of its own. */
 export type Exposed =
 	| {
 			readonly kind: "api";
@@ -33,7 +33,7 @@ const UNRESOLVED = new Set([2307, 2792, 7016]);
  * What the tau's programs import, in the order tau.json's `exposes` lists it; without the list,
  * every API in `apis`, which `loadApis` gave. Each `@api/<name>` it lists is an API of the tau, and
  * each other name a package in its node_modules/, whose declarations TypeScript checks as it checks
- * API files, with each `@api/<name>` typed by `api/<name>.d.ts`: it must find no errors in the
+ * API files, with each `@api/<name>` typed by `api/<name>/index.d.ts`: it must find no errors in the
  * packages' own files, and every import it follows from them must resolve to a file in the tau. No
  * node_modules/ in the tau holds an `@api` scope, which would hide the runtime's implementation.
  * The packages' JavaScript is the author's to keep to the spec. Throws, listing every problem.
@@ -48,7 +48,7 @@ export function loadExposed(tau: Tau, apis: readonly Api[]): Exposed[] {
 	for (const specifier of tau.exposes) {
 		if (specifier.startsWith(API_SCOPE)) {
 			const api = declared.get(specifier);
-			if (api === undefined) problems.push(`exposes ${specifier}, but the tau has no api/${specifier.slice(API_SCOPE.length)}.d.ts`);
+			if (api === undefined) problems.push(`exposes ${specifier}, but the tau has no api/${specifier.slice(API_SCOPE.length)}/index.d.ts`);
 			else exposed.push(toExpose(api));
 			continue;
 		}
@@ -59,18 +59,18 @@ export function loadExposed(tau: Tau, apis: readonly Api[]): Exposed[] {
 	const packages = exposed.filter((entry): entry is ExposedPackage => entry.kind === "package");
 	if (packages.length > 0) {
 		problems.push(...apiScopes(root).map((scope) => `${scope}: an @api scope in the tau would hide the runtime's implementations`));
-		problems.push(...checkPackages(root, packages, exposed));
+		problems.push(...checkPackages(root, apis, packages, exposed));
 	}
 	if (problems.length > 0) throw new Error(`${root}: what it exposes breaks the spec:\n  ${problems.join("\n  ")}`);
 	return exposed;
 }
 
 /**
- * Type-check the packages as API files are, with `@api/<name>` typed by `api/<name>.d.ts`, each
+ * Type-check the packages as API files are, with `@api/<name>` typed by `api/<name>/index.d.ts`, each
  * package's description put in `exposed`; the problems found.
  */
-function checkPackages(root: string, packages: readonly ExposedPackage[], exposed: Exposed[]): string[] {
-	const options: ts.CompilerOptions = { ...OPTIONS, paths: { [`${API_SCOPE}*`]: [path.join(root, "api", "*.d.ts")] } };
+function checkPackages(root: string, apis: readonly Api[], packages: readonly ExposedPackage[], exposed: Exposed[]): string[] {
+	const options: ts.CompilerOptions = { ...OPTIONS, paths: apiPaths(path.join(root, "api")) };
 	// Imports every package as a program would.
 	const importer = path.join(root, "__tau_exposed__.mts");
 	const imports = packages.map((entry, index) => `import type * as package${index} from ${JSON.stringify(entry.specifier)};`);
@@ -92,6 +92,7 @@ function checkPackages(root: string, packages: readonly ExposedPackage[], expose
 	const owners = packages.map((entry) => realpathSync(entry.dir));
 	const own = (file: string): boolean =>
 		owners.some((dir) => inside(file, dir) && !path.relative(dir, file).split(path.sep).includes("node_modules"));
+	const apiFolders = apis.map((api) => realpathSync(path.dirname(api.file)));
 	for (const source of program.getSourceFiles()) {
 		if (ambient.has(source.fileName)) continue;
 		const diagnostics = [...program.getSyntacticDiagnostics(source), ...program.getSemanticDiagnostics(source)];
@@ -105,7 +106,7 @@ function checkPackages(root: string, packages: readonly ExposedPackage[], expose
 		const real = realpathSync(source.fileName);
 		if (!inside(real, root)) problems.push(`the packages reach ${real}, which lies outside the tau`);
 		// The API files are loadApis's to check; other packages' types are taken as they are, but for what they import.
-		else if (inside(real, path.join(root, "api"))) continue;
+		else if (apiFolders.some((folder) => inside(real, folder))) continue;
 		else problems.push(...diagnostics.filter((d) => own(real) || UNRESOLVED.has(d.code)).map((d) => format(d, where)));
 	}
 

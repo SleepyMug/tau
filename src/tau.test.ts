@@ -19,129 +19,184 @@ function write(dir: string, files: Record<string, string | object>): string {
 	return root;
 }
 
-const PROMPT = `In every file under \${src}, replace "\${old}" with "\${new}", following the rules in \${rules}.
+const PROMPT = `Make the replacements in \${site}, following \${rules} and \${opts.style}, in a \${opts.tone} tone.
 Then write each changed file, and how many replacements it got, to \${report}.
 `;
 
 const REPLACE = {
 	description: "Replace text in every file of a directory, and report what changed.",
-	args: [
-		{ name: "src", type: "dir", role: "in", at: "site", description: "The files to edit." },
-		{ name: "edited", type: "dir", role: "out", at: "site", description: "Where they go, edited." },
-		{ name: "old", type: "text" },
-		{ name: "new", type: "text" },
-		{ name: "rules", type: "file", role: "in", at: "style/rules.md" },
-		{ name: "report", type: "file", role: "out" },
-	],
-	env: ["LANG", "TZ"],
+	params: {
+		site: { type: "dir", mode: "inout", description: "The files to edit." },
+		edits: {
+			type: "list",
+			description: "The replacements, made in order.",
+			of: { type: "record", fields: { old: { type: "text", description: "The text to replace." }, new: { type: "text" } } },
+		},
+		rules: { type: "file", mode: "in", description: "How to edit." },
+		report: { type: "file", mode: "out", description: "What changed." },
+		opts: {
+			type: "record",
+			description: "How to go about it.",
+			fields: { tone: { type: "text" }, style: { type: "path", mode: "in" } },
+		},
+	},
 };
 
-const caller = { cwd: "/home/u", env: { LANG: "C.UTF-8", HOME: "/home/u", PATH: "/usr/bin" } };
-const ARGV = ["site", "site", "foo", "", "style.md", "out/report.md"];
+const caller = { cwd: "/home/u" };
+const VALUES = {
+	site: { $inout: "site" },
+	edits: [{ old: "colour", new: "color" }],
+	rules: { $in: "style.md" },
+	report: { $out: "out/report.md" },
+	opts: { tone: "dry", style: { $in: "/guides/house" } },
+};
 
-const replace = () => loadTau(write("replace", { "PROMPT.md": PROMPT, "tau.json": REPLACE }));
+/** A tau of `tau.json` and `prompt`, written under `dir`. */
+const tauOf = (dir: string, json: object, prompt = "Go.") => loadTau(write(dir, { "PROMPT.md": prompt, "tau.json": json }));
+const replace = () => tauOf("replace", REPLACE, PROMPT);
 
-test("the agent sees each path at its place in its working directory", () => {
+test("a run's values bind by parameter, each handle at its own path unless the runtime places it", () => {
 	const tau = replace();
 	assert.equal(tau.description, REPLACE.description);
-	assert.deepEqual(tau.args.slice(0, 3), [
-		{ name: "src", type: "dir", role: "in", at: "site", description: "The files to edit." },
-		{ name: "edited", type: "dir", role: "out", at: "site", description: "Where they go, edited." },
-		{ name: "old", type: "text", description: undefined },
-	]);
-	const run = tau.bind(ARGV, caller, "/work");
+	assert.deepEqual(tau.params, REPLACE.params);
+	const run = tau.bind(VALUES, caller);
 	assert.equal(
 		run.prompt,
-		`In every file under /work/site, replace "foo" with "", following the rules in /work/style/rules.md.
-Then write each changed file, and how many replacements it got, to /work/report.
+		`Make the replacements in /home/u/site, following /home/u/style.md and /guides/house, in a dry tone.
+Then write each changed file, and how many replacements it got, to /home/u/out/report.md.
 `,
 	);
-	// Only what tau.json lists, and only what the caller has set.
-	assert.deepEqual(run.env, { LANG: "C.UTF-8" });
-	// A place is its name unless tau.json gives one; an in and an out of one type may share one.
-	assert.deepEqual(run.paths, [
-		{ name: "src", type: "dir", role: "in", at: "site", host: "/home/u/site", view: "/work/site" },
-		{ name: "edited", type: "dir", role: "out", at: "site", host: "/home/u/site", view: "/work/site" },
-		{ name: "rules", type: "file", role: "in", at: "style/rules.md", host: "/home/u/style.md", view: "/work/style/rules.md" },
-		{ name: "report", type: "file", role: "out", at: "report", host: "/home/u/out/report.md", view: "/work/report" },
+	assert.deepEqual(run.handles, [
+		{ at: "site", mode: "inout", kind: "dir", host: "/home/u/site", view: "/home/u/site" },
+		{ at: "rules", mode: "in", kind: "file", host: "/home/u/style.md", view: "/home/u/style.md" },
+		{ at: "report", mode: "out", kind: "file", host: "/home/u/out/report.md", view: "/home/u/out/report.md" },
+		{ at: "opts.style", mode: "in", kind: "path", host: "/guides/house", view: "/guides/house" },
 	]);
-	assert.throws(() => tau.bind(ARGV, caller, "work"), /the working directory must be an absolute path: work/);
+	assert.deepEqual(run.values, {
+		site: { $inout: "/home/u/site" },
+		edits: [{ old: "colour", new: "color" }],
+		rules: { $in: "/home/u/style.md" },
+		report: { $out: "/home/u/out/report.md" },
+		opts: { tone: "dry", style: { $in: "/guides/house" } },
+	});
+
+	// A runtime that copies places each handle where it likes, asked in the order of the values.
+	const asked: string[] = [];
+	const placed = tau.bind(VALUES, caller, ({ at, host }) => {
+		asked.push(at);
+		return path.join("/work", String(asked.length), path.basename(host));
+	});
+	assert.deepEqual(asked, ["site", "rules", "report", "opts.style"]);
+	assert.match(placed.prompt, /^Make the replacements in \/work\/1\/site, following \/work\/2\/style\.md and \/work\/4\/house,/u);
+	assert.deepEqual(placed.values.report, { $out: "/work/3/report.md" });
+	assert.deepEqual(placed.handles[2], { at: "report", mode: "out", kind: "file", host: "/home/u/out/report.md", view: "/work/3/report.md" });
 });
 
-test("places may lie in a directory's", () => {
-	const tau = loadTau(
-		write("nested", {
-			"PROMPT.md": "Build ${src} into ${dist}, with ${config}.",
-			"tau.json": {
-				args: [
-					{ name: "src", type: "dir", role: "in" },
-					{ name: "config", type: "file", role: "in", at: "src/config.json" },
-					{ name: "dist", type: "dir", role: "out", at: "src/dist" },
-				],
-			},
-		}),
-	);
-	const run = tau.bind(["repo", "local.json", "out"], caller, "/work");
-	assert.equal(run.prompt, "Build /work/src into /work/src/dist, with /work/src/config.json.");
+test("the values must fit the types, listing every problem", () => {
+	const tau = replace();
+	assert.throws(() => tau.bind({ site: "site", extra: "x", more: { $in: "y" } }, caller), (error: Error) => {
+		assert.deepEqual(error.message.split("\n"), [
+			"the values do not fit the tau:",
+			"  no value for edits, rules, report, opts",
+			"  no parameter is named extra, more",
+			"  site: is a text, where an $inout handle goes",
+		]);
+		return true;
+	});
+	const values = {
+		site: { $in: "site" },
+		edits: [{ old: "a" }, { old: "a", new: "b", why: "c" }, "x"],
+		rules: { $in: "" },
+		report: { $out: "r.md", $in: "r.md" },
+		opts: [],
+	};
+	assert.throws(() => tau.bind(values, caller), (error: Error) => {
+		assert.deepEqual(error.message.split("\n"), [
+			"the values do not fit the tau:",
+			"  site: is an $in handle, where an $inout one goes",
+			"  edits[0]: no value for new",
+			"  edits[1]: no field is named why",
+			"  edits[2]: is a text, where a record goes",
+			"  rules: a handle's path cannot be empty",
+			'  report: {"$out":"r.md","$in":"r.md"} is not a handle, which is {"$in" | "$out" | "$inout": <path>}',
+			"  opts: is a list, where a record goes",
+		]);
+		return true;
+	});
+	assert.throws(() => tau.bind([], caller), /the values must be a record, from each parameter's name to its value/);
+	assert.throws(() => tau.bind({ ...VALUES, edits: [{ old: 1, new: null }] }, caller), (error: Error) => {
+		assert.match(error.message, /edits\[0\]\.old: 1 is not a value: a text, a handle, a list or a record/);
+		assert.match(error.message, /edits\[0\]\.new: null is not a value/);
+		return true;
+	});
+});
+
+test("an open record takes any values, each handle with the mode it carries", () => {
+	const tau = tauOf("bestof", {
+		params: {
+			agent: { type: "dir", mode: "in", description: "The tau to run." },
+			args: { type: "record", description: "Its values." },
+		},
+	});
+	const args = { brief: { $in: "notes.md" }, deck: { $out: "q3.pptx" }, pages: [{ $in: "a" }, "b"], opts: { site: { $inout: "s" } } };
+	const run = tau.bind({ agent: { $in: "deck" }, args }, caller);
 	assert.deepEqual(
-		run.paths.map(({ name, view }) => [name, view]),
-		[["src", "/work/src"], ["config", "/work/src/config.json"], ["dist", "/work/src/dist"]],
+		run.handles.map(({ at, mode, kind }) => [at, mode, kind]),
+		[["agent", "in", "dir"], ["args.brief", "in", "path"], ["args.deck", "out", "path"], ["args.pages[0]", "in", "path"], ["args.opts.site", "inout", "path"]],
 	);
+	assert.deepEqual(run.values.args, {
+		brief: { $in: "/home/u/notes.md" },
+		deck: { $out: "/home/u/q3.pptx" },
+		pages: [{ $in: "/home/u/a" }, "b"],
+		opts: { site: { $inout: "/home/u/s" } },
+	});
+	assert.throws(() => tau.bind({ agent: { $in: "deck" }, args: { "2nd": "x", a: { $share: "y" }, b: { "my-key": "z" } } }, caller), (error: Error) => {
+		assert.deepEqual(error.message.split("\n"), [
+			"the values do not fit the tau:",
+			'  args: "2nd" is not a name, which matches ^[A-Za-z_][A-Za-z0-9_]*$',
+			'  args.a: {"$share":"y"} is not a handle, which is {"$in" | "$out" | "$inout": <path>}',
+			'  args.b: "my-key" is not a name, which matches ^[A-Za-z_][A-Za-z0-9_]*$',
+		]);
+		return true;
+	});
 });
 
-test("a tau without tau.json takes no arguments and sees no variables", () => {
+test("a tau without tau.json takes no parameters", () => {
 	const tau = loadTau(write("plain", { "PROMPT.md": "Say hi. Costs $1, and $${x} stays as it is." }));
-	assert.deepEqual([tau.description, tau.args, tau.env], [undefined, [], []]);
-	assert.deepEqual(tau.bind([], caller, "/work"), { prompt: "Say hi. Costs $1, and ${x} stays as it is.", env: {}, paths: [] });
-	assert.throws(() => tau.bind(["x"], caller, "/work"), /expected 0 argument\(s\), got 1/);
+	assert.deepEqual([tau.description, tau.params, tau.exposes], [undefined, {}, undefined]);
+	assert.deepEqual(tau.bind({}, caller), { prompt: "Say hi. Costs $1, and ${x} stays as it is.", values: {}, handles: [] });
+	assert.throws(() => tau.bind({ x: "1" }, caller), /no parameter is named x/);
 	assert.throws(() => loadTau(tmp), /not a tau \(no PROMPT\.md\)/);
 });
 
 test("tau.json outside the spec is refused, naming the file and the reason", () => {
+	const text = { type: "text", description: "Some text." };
+	const fileIn = { type: "file", mode: "in", description: "A file." };
 	const refused: [string, unknown, RegExp][] = [
 		["syntax", "{", /tau\.json: is not JSON/],
 		["array", [], /tau\.json: must be an object/],
-		["unknown", { args: [], shell: "bash" }, /tau\.json: unknown key "shell"/],
+		["unknown", { params: {}, shell: "bash" }, /tau\.json: unknown key "shell"/],
+		["vars", { vars: {} }, /tau\.json: unknown key "vars"/],
 		["description", { description: ["hi"] }, /tau\.json: `description` must be a string/],
-		["nameless", { args: [{ type: "text" }] }, /args\[0\] needs a `name`/],
-		["badname", { args: [{ name: "2nd", type: "text" }] }, /args\[0\] needs a `name`/],
-		["twice", { args: [{ name: "a", type: "text" }, { name: "a", type: "text" }] }, /two arguments are named a/],
-		["untyped", { args: [{ name: "a" }] }, /a: needs a `type`, one of text, file, dir/],
-		["type", { args: [{ name: "a", type: "path" }] }, /a: `type` "path" is not one of text, file, dir/],
-		["roleless", { args: [{ name: "a", type: "file" }] }, /a: a file needs a `role`, one of in, out/],
-		["role", { args: [{ name: "a", type: "dir", role: "share" }] }, /a: `role` "share" is not one of in, out/],
-		["textrole", { args: [{ name: "a", type: "text", role: "in" }] }, /a: a text argument has no `role`/],
-		["textat", { args: [{ name: "a", type: "text", at: "a" }] }, /a: a text argument has no `at`/],
-		...["", "/a", "a/", "a//b", "./a", "a/../b", ".."].map((at): [string, unknown, RegExp] => [
-			`at${JSON.stringify(at).replace(/\W/gu, "_")}`,
-			{ args: [{ name: "a", type: "dir", role: "in", at }] },
-			/a: `at` "[^"]*" is not a relative path of names separated by \/, none of them empty, \. or \.\./,
-		]),
-		["atnumber", { args: [{ name: "a", type: "dir", role: "in", at: 1 }] }, /a: `at` 1 is not a relative path/],
-		[
-			"bothin",
-			{ args: [{ name: "a", type: "dir", role: "in", at: "x" }, { name: "b", type: "dir", role: "in", at: "x" }] },
-			/a and b are both at x, where only an in and an out of the same type may be/,
-		],
-		[
-			"bothtypes",
-			{ args: [{ name: "a", type: "dir", role: "in", at: "x" }, { name: "b", type: "file", role: "out", at: "x" }] },
-			/a and b are both at x, where only an in and an out/,
-		],
-		[
-			"byname",
-			{ args: [{ name: "a", type: "file", role: "out" }, { name: "b", type: "file", role: "out", at: "a" }] },
-			/a and b are both at a, where/,
-		],
-		[
-			"infile",
-			{ args: [{ name: "a", type: "dir", role: "out", at: "x/y" }, { name: "b", type: "file", role: "in", at: "x" }] },
-			/a is at x\/y, inside b's place x, which is a file/,
-		],
-		["argdescription", { args: [{ name: "a", type: "text", description: 1 }] }, /a: `description` must be a string/],
-		["argkey", { args: [{ name: "a", type: "file", role: "in", readonly: true }] }, /a: unknown key "readonly"/],
-		["envname", { env: ["A-B"] }, /`env`: "A-B" is not a variable name/],
-		["envtwice", { env: ["A", "A"] }, /`env` lists A twice/],
+		["paramslist", { params: [] }, /`params` must be an object, from each parameter's name to its type/],
+		["badname", { params: { "2nd": text } }, /`params`: "2nd" is not a parameter's name/],
+		["self", { params: { self: text } }, /`params`: `self` names the tau's own directory, so no parameter has that name/],
+		["value", { params: { a: "text" } }, /a must be an object, with its `type`/],
+		["undescribed", { params: { a: { type: "text" } } }, /a: needs a `description`, saying what it is/],
+		["blank", { params: { a: { type: "text", description: " " } } }, /a: needs a `description`/],
+		["untyped", { params: { a: { description: "A." } } }, /a: needs a `type`, one of text, file, dir, path, list, record/],
+		["type", { params: { a: { type: "number", description: "A." } } }, /a: `type` "number" is not one of text/],
+		["modeless", { params: { a: { type: "file", description: "A." } } }, /a: a file needs a `mode`, one of in, out, inout/],
+		["mode", { params: { a: { ...fileIn, mode: "share" } } }, /a: `mode` "share" is not one of in, out, inout/],
+		["textmode", { params: { a: { ...text, mode: "in" } } }, /a: a text has no `mode`/],
+		["key", { params: { a: { ...fileIn, at: "a" } } }, /a: unknown key "at"/],
+		["listof", { params: { a: { type: "list", description: "A." } } }, /a: a list needs `of`, the type of its values/],
+		["listitem", { params: { a: { type: "list", description: "A.", of: { type: "dir" } } } }, /a\[\]: a dir needs a `mode`/],
+		["listfields", { params: { a: { type: "list", description: "A.", of: text, fields: {} } } }, /a: a list has no `fields`/],
+		["fields", { params: { a: { type: "record", description: "A.", fields: [] } } }, /a: `fields` must be an object/],
+		["fieldname", { params: { a: { type: "record", description: "A.", fields: { "b-c": text } } } }, /a: "b-c" is not a field's name/],
+		["field", { params: { a: { type: "record", description: "A.", fields: { b: { type: "dir", mode: "up" } } } } }, /a\.b: `mode` "up" is not one of/],
+		["fielddescription", { params: { a: { type: "record", description: "A.", fields: { b: { type: "text", description: 1 } } } } }, /a\.b: `description` must be a string/],
 		["exposes", { exposes: "notes-kit" }, /`exposes` must be an array/],
 		["exposesname", { exposes: ["notes-kit/sub"] }, /`exposes`: "notes-kit\/sub" is not a package's name/],
 		["exposestwice", { exposes: ["@api/notes", "@api/notes"] }, /`exposes` lists @api\/notes twice/],
@@ -153,45 +208,66 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 	}
 });
 
-test("the prompt may name only declared arguments, and the tau's own directory", () => {
+test("the prompt names only texts and handles, through closed records, and the tau's own directory", () => {
+	const json = {
+		params: {
+			...REPLACE.params,
+			args: { type: "record", description: "Anything." },
+		},
+	};
 	const refused: [string, RegExp][] = [
-		["Look at ${missing}.", /PROMPT\.md: line 1: \$\{missing\} is neither \$\{self\} nor an argument tau\.json declares/],
+		["Look at ${missing}.", /PROMPT\.md: line 1: \$\{missing\} is neither \$\{self\} nor a parameter tau\.json declares/],
 		["Hi\n${1:-you}", /line 2: \$\{1:-you\} is neither/],
-		["Hi ${@:2}", /\$\{@:2\} is neither/],
-		["Hi ${src", /line 1: \$\{src is not closed/],
+		["Hi ${site", /line 1: \$\{site is not closed/],
+		["${edits}", /\$\{edits\} names a list of records, which the prompt cannot hold: name a list of texts or handles, or read it in a program/],
+		["${opts}", /\$\{opts\} names a record, which the prompt cannot hold/],
+		["${edits.old}", /\$\{edits\.old\} names what lies in edits, a list, which the prompt cannot hold: the agent's programs read it, through the tau API/],
+		["${args.x}", /\$\{args\.x\} names what lies in args, a record that is open, which the prompt cannot hold/],
+		["${opts.size}", /\$\{opts\.size\} names no field of opts/],
+		["${site.x}", /\$\{site\.x\} names what lies in site, an \$inout handle/],
+		["${self.x}", /\$\{self\.x\} is neither/],
 	];
 	for (const [index, [prompt, reason]] of refused.entries()) {
-		const dir = write(`prompts/${index}`, { "PROMPT.md": prompt, "tau.json": { args: [{ name: "src", type: "text" }] } });
-		assert.throws(() => loadTau(dir), reason);
+		assert.throws(() => tauOf(`prompts/${index}`, json, prompt), reason, prompt);
 	}
-	const tau = loadTau(
-		write("prompts/ok", { "PROMPT.md": "${a}${a} $${a} $$${a}", "tau.json": { args: [{ name: "a", type: "text" }] } }),
+	const tau = tauOf("prompts/ok", { params: { a: { type: "text", description: "Some text." } } }, "${a}${a} $${a} $$${a}");
+	// A value is not expanded again.
+	assert.equal(tau.bind({ a: "x" }, caller).prompt, "xx ${a} $${a}");
+	assert.equal(tau.bind({ a: "${self}" }, caller).prompt, "${self}${self} ${a} $${a}");
+	// A list of texts or handles is a JSON array, of each one as it would be.
+	const lists = tauOf(
+		"prompts/lists",
+		{
+			params: {
+				tags: { type: "list", of: { type: "text" }, description: "Tags." },
+				pages: { type: "list", of: { type: "file", mode: "in" }, description: "Pages." },
+			},
+		},
+		"Tag ${tags}; read ${pages}.",
 	);
-	assert.equal(tau.bind(["x"], caller, "/work").prompt, "xx ${a} $${a}");
+	const bound = lists.bind({ tags: ["a, b", 'say "hi"'], pages: [{ $in: "a.md" }, { $in: "/b.md" }] }, caller);
+	assert.equal(bound.prompt, 'Tag ["a, b","say \\"hi\\""]; read ["/home/u/a.md","/b.md"].');
 });
 
 test("${self} is where the agent sees the tau's own directory: where it is, unless the runtime puts it elsewhere", () => {
 	const dir = write("self", {
 		"PROMPT.md": "Run ${self}/agents/counter on ${text}; $${self} stays.",
-		"tau.json": { args: [{ name: "text", type: "file", role: "in" }] },
+		"tau.json": { params: { text: { type: "file", mode: "in", description: "The text." } } },
 	});
 	const tau = loadTau(dir);
-	assert.equal(tau.bind(["a.txt"], caller, "/work").prompt, `Run ${dir}/agents/counter on /work/text; \${self} stays.`);
-	const placed = tau.bind(["a.txt"], caller, "/work", "/agent");
-	assert.equal(placed.prompt, "Run /agent/agents/counter on /work/text; ${self} stays.");
-	// The name is the tau's own, so no argument takes it.
-	const refused = write("self-arg", { "PROMPT.md": "${self}", "tau.json": { args: [{ name: "self", type: "text" }] } });
-	assert.throws(() => loadTau(refused), /args\[0\]: `self` names the tau's own directory, so no argument has that name/);
+	assert.equal(tau.bind({ text: { $in: "a.txt" } }, caller).prompt, `Run ${dir}/agents/counter on /home/u/a.txt; \${self} stays.`);
+	const placed = tau.bind({ text: { $in: "a.txt" } }, caller, () => "/work/a.txt", "/agent");
+	assert.equal(placed.prompt, "Run /agent/agents/counter on /work/a.txt; ${self} stays.");
 });
 
 test("a symlink in what a runtime reads is relative, and stays in the tau", () => {
 	const dir = write("links", {
 		"PROMPT.md": "Hi.",
-		"api/shared/types.d.ts": "",
+		"api/notes/types.d.ts": "",
+		"lib/clock/index.d.ts": "",
 		"lib/skill/SKILL.md": "",
 		"lib/deep/SKILL.md": "",
 		"src/notes/index.ts": "",
-		"api/node_modules/.pnpm/yaml@2/node_modules/yaml/index.d.ts": "",
 	});
 	const at = (target: string, file: string) => {
 		mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
@@ -199,13 +275,13 @@ test("a symlink in what a runtime reads is relative, and stays in the tau", () =
 	};
 	// Fine: relative, and inside.
 	at("../lib/skill", "skills/ok");
-	at("shared/types.d.ts", "api/types.d.ts");
-	at(".pnpm/yaml@2/node_modules/yaml", "api/node_modules/yaml");
+	at("types.d.ts", "api/notes/alias.d.ts");
+	at("../lib/clock", "api/clock");
 	// What no runtime reads is the author's.
 	at("/usr", "src/notes/node_modules");
 	// Refused.
 	at("/usr", "skills/absolute");
-	at("../../outside.d.ts", "api/outside.d.ts");
+	at("../../../outside.d.ts", "api/notes/outside.d.ts");
 	at("nowhere", "api/dangling");
 	at("loop-b", "api/loop-a");
 	at("loop-a", "api/loop-b");
@@ -218,7 +294,7 @@ test("a symlink in what a runtime reads is relative, and stays in the tau", () =
 			"api/dangling: leads to api/nowhere, which does not exist",
 			"api/loop-a: is a loop of symlinks",
 			"api/loop-b: is a loop of symlinks",
-			"api/outside.d.ts: leads outside the tau, to " + path.join(tmp, "outside.d.ts"),
+			"api/notes/outside.d.ts: leads outside the tau, to " + path.join(tmp, "outside.d.ts"),
 			"lib/deep/absolute: leads to the absolute path /usr; a symlink in a tau is relative",
 			"skills/absolute: leads to the absolute path /usr; a symlink in a tau is relative",
 			"skills/chain: leads through lib/chain to the absolute path /usr; a symlink in a tau is relative",
@@ -227,82 +303,121 @@ test("a symlink in what a runtime reads is relative, and stays in the tau", () =
 	});
 });
 
-test("argv must fit the arguments, whose paths may overlap", () => {
-	const tau = replace();
-	assert.throws(() => tau.bind(["site"], caller, "/work"), /expected 6 argument\(s\) \(src, edited, old, new, rules, report\), got 1/);
-	assert.throws(() => tau.bind(["site", "site", "a", "b", "", "r.md"], caller, "/work"), /rules: a path cannot be empty/);
-	const run = tau.bind(["site", "done", "a", "b", "site/rules.md", "site"], caller, "/work");
-	assert.deepEqual(
-		run.paths.map(({ name, host }) => [name, host]),
-		[["src", "/home/u/site"], ["edited", "/home/u/done"], ["rules", "/home/u/site/rules.md"], ["report", "/home/u/site"]],
-	);
+/** The values of REPLACE, with `opts.style` at `style`, for a caller in `home`. */
+const valuesAt = (site: string, rules: string, report: string, style = "guide") => ({
+	site: { $inout: site },
+	edits: [],
+	rules: { $in: rules },
+	report: { $out: report },
+	opts: { tone: "dry", style: { $in: style } },
 });
 
-test("the shapes of inputs and outputs are checked, listing every problem", () => {
-	const home = write("home", { "site/index.md": "foo", "style.md": "rules", "out/.keep": "" });
-	const work = write("work", { "site/index.md": "bar" });
+test("the handles' paths are checked when the run starts, and ends, listing every problem", () => {
+	const home = write("home", { "site/index.md": "foo", "style.md": "rules", "guide/a.md": "a", "out/.keep": "" });
 	const tau = replace();
-	const bind = (...argv: string[]) => tau.bind(argv, { cwd: home, env: {} }, work);
+	const bind = (...argv: Parameters<typeof valuesAt>) => tau.bind(valuesAt(...argv), { cwd: home });
 
-	const run = bind("site", "site", "foo", "bar", "style.md", "out/report.md");
+	const run = bind("site", "style.md", "out/report.md");
 	checkInputs(run);
-	// What the agent left at each out's place, which is then put at the caller's path.
 	assert.throws(
 		() => checkOutputs(run),
-		(error: Error) => error.message === `the run did not leave what the tau declares:\n  report: ${work}/report does not exist`,
+		(error: Error) => error.message === `the run did not leave what the tau declares:\n  report: ${home}/out/report.md does not exist`,
 	);
-	writeFileSync(path.join(work, "report"), "index.md: 1");
-	checkOutputs(run);
-	// An output may already be there, when it is of its kind: the run replaces it.
 	writeFileSync(path.join(home, "out/report.md"), "index.md: 1");
+	checkOutputs(run);
+	// An $out may be there already, when it is of its kind.
 	checkInputs(run);
 
 	assert.throws(
-		() => checkInputs(bind("style.md", "style.md", "foo", "bar", "site", "nowhere/report.md")),
+		() => checkInputs(bind("style.md", "site", "nowhere/report.md", "missing")),
 		(error: Error) =>
 			error.message ===
 			[
-				"the arguments do not fit the tau:",
-				`  src: ${home}/style.md is not a directory`,
-				`  edited: ${home}/style.md is not a directory`,
+				"the handles do not fit the tau:",
+				`  site: ${home}/style.md is not a directory`,
 				`  rules: ${home}/site is not a file`,
 				`  report: cannot go in ${home}/nowhere, which does not exist`,
+				`  opts.style: ${home}/missing does not exist`,
 			].join("\n"),
 	);
-	assert.throws(() => checkInputs(bind("missing", "site", "foo", "bar", "style.md", "site/../out")), (error: Error) => {
-		assert.match(error.message, /src: \S+\/missing does not exist/);
-		assert.match(error.message, /report: \S+\/out is not a file/);
-		return true;
-	});
-	rmSync(path.join(work, "site"), { recursive: true });
-	writeFileSync(path.join(work, "site"), "");
-	assert.throws(() => checkOutputs(run), /edited: \S+\/work\/site is not a directory/);
+	assert.throws(() => checkInputs(bind("site", "style.md", "site/../out")), /report: \S+\/out is not a file/);
+	rmSync(path.join(home, "site"), { recursive: true });
+	writeFileSync(path.join(home, "site"), "");
+	assert.throws(() => checkOutputs(run), /site: \S+\/home\/site is not a directory/);
 });
 
-test("paths may overlap, through symlinks too", () => {
-	const home = write("home3", { "site/index.md": "foo", "style.md": "rules" });
+test("the caller's paths may overlap, through its symlinks too, but a handle's path is never one itself", () => {
+	const home = write("home3", { "site/index.md": "foo", "style.md": "rules", "guide/a.md": "a" });
 	symlinkSync("site", path.join(home, "link"));
 	symlinkSync("style.md", path.join(home, "rules.md"));
 	const tau = replace();
-	const bind = (...argv: string[]) => tau.bind(argv, { cwd: home, env: {} }, "/work");
-	// A report written into the files the agent edits, and a file read and written.
-	checkInputs(bind("site", "site", "a", "b", "style.md", "link/report.md"));
-	checkInputs(bind("site", "link", "a", "b", "rules.md", "style.md"));
-	// An `out` that is a symlink is followed, as every path is.
-	checkInputs(bind("site", "site", "a", "b", "style.md", "rules.md"));
-	assert.throws(() => checkInputs(bind("site", "site", "a", "b", "style.md", "link")), /report: \S+\/link is not a file/);
+	const bind = (...argv: Parameters<typeof valuesAt>) => tau.bind(valuesAt(...argv), { cwd: home });
+	checkInputs(bind("site", "site/index.md", "link/report.md", "site"));
+	// Where an $out goes, a symlink is followed, as it is in any path.
+	checkInputs(bind("site", "style.md", "rules.md"));
+	assert.throws(() => checkInputs(bind("site", "style.md", "link")), /report: \S+\/link is not a file/);
+	assert.throws(
+		() => checkInputs(bind("link", "rules.md", "r.md")),
+		(error: Error) =>
+			error.message ===
+			[
+				"the handles do not fit the tau:",
+				`  site: ${home}/link is a symlink, which a handle's path cannot be`,
+				`  rules: ${home}/rules.md is a symlink, which a handle's path cannot be`,
+			].join("\n"),
+	);
 });
 
-test("a runtime whose agent works elsewhere checks its outputs where it has them, with `locate`", () => {
+test("a symlink in a handle's directory is relative, and stays in it", () => {
+	const home = write("home4", { "site/index.md": "foo", "site/docs/a.md": "a", "style.md": "rules", "guide/a.md": "a", secret: "s" });
+	const site = path.join(home, "site");
+	symlinkSync("docs/a.md", path.join(site, "inner"));
+	symlinkSync("../docs", path.join(site, "docs/self"));
+	symlinkSync("inner", path.join(site, "chain"));
+	const run = () => replace().bind(valuesAt("site", "style.md", "r.md"), { cwd: home });
+	checkInputs(run());
+
+	symlinkSync("../secret", path.join(site, "out"));
+	symlinkSync(path.join(site, "index.md"), path.join(site, "docs/absolute"));
+	symlinkSync("gone", path.join(site, "dangling"));
+	symlinkSync("loop", path.join(site, "loop"));
+	assert.throws(
+		() => checkInputs(run()),
+		(error: Error) =>
+			error.message ===
+			[
+				"the handles do not fit the tau:",
+				`  site: ${site}/dangling: leads to ${site}/gone, which does not exist`,
+				`  site: ${site}/docs/absolute: leads to the absolute path ${site}/index.md; a symlink in ${site} is relative`,
+				`  site: ${site}/loop: is a loop of symlinks`,
+				`  site: ${site}/out: leads outside ${site}, to ${home}/secret`,
+			].join("\n"),
+	);
+});
+
+test("a runtime whose agent works on copies checks what it left where it has them, with `locate`", () => {
 	const stage = write("stage", { "work/report": "done", "work/site/index.md": "bar" });
-	const home = write("home2", { "site/index.md": "foo", "style.md": "rules", "out/.keep": "" });
-	const run = replace().bind(["site", "site", "foo", "bar", "style.md", "out/report.md"], { cwd: home, env: {} }, "/work");
+	const home = write("home2", { "site/index.md": "foo", "style.md": "rules", "guide/a.md": "a", "out/.keep": "" });
+	const places: Record<string, string> = { site: "/work/site", rules: "/work/rules", report: "/work/report", "opts.style": "/work/guide" };
+	const run = replace().bind(valuesAt("site", "style.md", "out/report.md"), { cwd: home }, ({ at }) => places[at] as string);
 	checkInputs(run);
 	const locate = ({ view }: { view: string }) => path.join(stage, view);
 	checkOutputs(run, locate);
-	// By default, outputs are looked for at their views.
-	assert.throws(() => checkOutputs(run), /edited: \/work\/site does not exist\n {2}report: \/work\/report does not exist/);
+	// By default, they are looked for at their views.
+	assert.throws(() => checkOutputs(run), /site: \/work\/site does not exist\n {2}report: \/work\/report does not exist/);
 	rmSync(path.join(stage, "work/report"));
 	mkdirSync(path.join(stage, "work/report"));
-	assert.throws(() => checkOutputs(run, locate), /report: \S+\/stage\/work\/report is not a file/);
+	symlinkSync("index.md", path.join(stage, "work/site/kept"));
+	symlinkSync("../../work", path.join(stage, "work/site/up"));
+	assert.throws(() => checkOutputs(run, locate), (error: Error) => {
+		assert.deepEqual(error.message.split("\n"), [
+			"the run did not leave what the tau declares:",
+			`  site: ${stage}/work/site/up: leads outside ${stage}/work/site, to ${stage}/work`,
+			`  report: ${stage}/work/report is not a file`,
+		]);
+		return true;
+	});
+	rmSync(path.join(stage, "work/report"), { recursive: true });
+	symlinkSync("site/index.md", path.join(stage, "work/report"));
+	assert.throws(() => checkOutputs(run, locate), /report: \S+\/stage\/work\/report is a symlink, which a handle's path cannot be/);
 });

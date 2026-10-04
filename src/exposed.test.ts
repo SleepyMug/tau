@@ -25,8 +25,8 @@ function write(dir: string, files: Record<string, string | object>, links: Recor
 
 const APIS = {
 	"PROMPT.md": "Keep notes.",
-	"api/notes.d.ts": "export interface Note { id: number; text: string }\nexport declare function addNote(text: string): Promise<Note>;\n",
-	"api/clock.d.ts": "/**\n * The time.\n *\n * @packageDocumentation\n */\nexport declare function now(): Date;\n",
+	"api/notes/index.d.ts": "export interface Note { id: number; text: string }\nexport declare function addNote(text: string): Promise<Note>;\n",
+	"api/clock/index.d.ts": "/**\n * The time.\n *\n * @packageDocumentation\n */\nexport declare function now(): Date;\n",
 };
 
 const KIT = "node_modules/.pnpm/notes-kit@1.0.0/node_modules/notes-kit";
@@ -108,7 +108,7 @@ test("what a tau exposes is refused, listing every problem, unless its packages 
 		assert.equal(lines[0], `${dir}: what it exposes breaks the spec:`);
 		const problems = lines.slice(1).map((line) => line.trim());
 		for (const expected of [
-			"exposes @api/missing, but the tau has no api/missing.d.ts",
+			"exposes @api/missing, but the tau has no api/missing/index.d.ts",
 			"exposes absent, which is not a package in node_modules/",
 			"node_modules/.pnpm/notes-kit@1.0.0/node_modules/@api: an @api scope in the tau would hide the runtime's implementations",
 			/^node_modules\/broken\/index\.d\.ts:1:15: '"@api\/notes"' has no exported member named 'Notee'/,

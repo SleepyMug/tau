@@ -14,38 +14,64 @@ const MAX_HOPS = 40;
  */
 export function linkProblems(dir: string, packages: boolean): string[] {
 	const root = realpathSync(dir);
-	const relative = (file: string): string => path.relative(root, file) || ".";
+	const parts = (packages ? [...READ, "node_modules"] : READ).map((part) => path.join(root, part));
+	return rootedLinkProblems(root, parts, { inside: "a tau", outside: "the tau" }, (file) => path.relative(root, file) || ".");
+}
+
+/**
+ * The symlinks in the directory `dir`, the value of an `in` or an `out` (docs/spec/paths.md), that
+ * break the spec: each is relative, and leads, through any further symlinks, all relative, to
+ * something that exists in `dir`. One problem per symlink, naming it under `dir` as given.
+ */
+export function valueLinkProblems(dir: string): string[] {
+	const root = realpathSync(dir);
+	return rootedLinkProblems(root, [root], { inside: dir, outside: dir }, (file) => path.join(dir, path.relative(root, file)));
+}
+
+/**
+ * The symlinks under `starts` that do not lead, relative and through any further symlinks, all
+ * relative, to something that exists in `root`, which is real. A symlink to a directory is
+ * followed, and what it leads to is checked the same way. `scope` names `root` in the problems, as
+ * what a symlink is in and what it leads outside of, and `label` names each file.
+ */
+function rootedLinkProblems(
+	root: string,
+	starts: readonly string[],
+	scope: { readonly inside: string; readonly outside: string },
+	label: (file: string) => string,
+): string[] {
 	const problems: string[] = [];
 	const walked = new Set<string>();
 
 	/** Where `link` finally leads, or undefined once its problem is recorded. */
 	const follow = (link: string): string | undefined => {
 		const fail = (problem: string): undefined => {
-			problems.push(`${relative(link)}: ${problem}`);
+			problems.push(`${label(link)}: ${problem}`);
 			return undefined;
 		};
 		let at = link;
 		for (let hops = 0; hops < MAX_HOPS; hops++) {
 			const target = readlinkSync(at);
-			const via = at === link ? "" : ` through ${relative(at)}`;
-			if (path.isAbsolute(target)) return fail(`leads${via} to the absolute path ${target}; a symlink in a tau is relative`);
+			const via = at === link ? "" : ` through ${label(at)}`;
+			if (path.isAbsolute(target))
+				return fail(`leads${via} to the absolute path ${target}; a symlink in ${scope.inside} is relative`);
 			let base: string;
 			try {
 				base = realpathSync(path.dirname(at));
 			} catch {
-				return fail(`leads${via} to ${relative(at)}, which does not exist`);
+				return fail(`leads${via} to ${label(at)}, which does not exist`);
 			}
 			at = path.resolve(base, target);
-			if (!inside(at, root)) return fail(`leads${via} outside the tau, to ${at}`);
+			if (!inside(at, root)) return fail(`leads${via} outside ${scope.outside}, to ${at}`);
 			let isLink: boolean;
 			try {
 				isLink = lstatSync(at).isSymbolicLink();
 			} catch {
-				return fail(`leads${via} to ${relative(at)}, which does not exist`);
+				return fail(`leads${via} to ${label(at)}, which does not exist`);
 			}
 			if (isLink) continue;
 			const end = realpathSync(at);
-			return inside(end, root) ? end : fail(`leads${via} outside the tau, to ${end}`);
+			return inside(end, root) ? end : fail(`leads${via} outside ${scope.outside}, to ${end}`);
 		}
 		return fail("is a loop of symlinks");
 	};
@@ -70,10 +96,19 @@ export function linkProblems(dir: string, packages: boolean): string[] {
 	const walk = (directory: string): void => {
 		if (walked.has(directory)) return;
 		walked.add(directory);
-		for (const entry of readdirSync(directory, { withFileTypes: true })) visit(path.join(directory, entry.name), entry);
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(directory, { withFileTypes: true });
+		} catch (error) {
+			problems.push(`${label(directory)}: cannot be read: ${error instanceof Error ? error.message : String(error)}`);
+			return;
+		}
+		// In order of name, so that the problems are listed the same way on every file system.
+		entries.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
+		for (const entry of entries) visit(path.join(directory, entry.name), entry);
 	};
 
-	for (const part of packages ? [...READ, "node_modules"] : READ) visit(path.join(root, part));
+	for (const start of starts) visit(start);
 	return problems;
 }
 

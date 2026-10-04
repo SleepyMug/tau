@@ -12,7 +12,8 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "SPEC.md"
+    "TAU.md",
+    "docs/spec"
   ],
   "publishConfig": {
     "access": "public"
