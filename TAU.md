@@ -1,127 +1,118 @@
 # TAU (Transportable Agent Unit)
 
 A **tau** is an agent packaged as a directory: a prompt, what it takes and gives, and the APIs its
-programs call, declared in TypeScript. A **runtime** runs it for a **caller**: a person, a
-program, or another agent. The full spec is in [docs/spec/](docs/spec/index.md).
+programs call, declared in TypeScript.
 
 ## Layout
 
 ```
-count-words/
-├── PROMPT.md                   the prompt
-├── tau.json                    what it takes and gives
-├── skills/<skill>/SKILL.md     skills the agent can use (optional)
-├── api/stats/index.d.ts        an API, which programs import as @api/stats (optional)
-└── node_modules/<package>/     packages of its own, built on its APIs (optional)
+plan-trip/
+├── PROMPT.md                   the prompt, the only file required
+├── tau.json                    what it takes, and what its programs import
+├── skills/visas/SKILL.md       a skill the agent can use
+├── api/travel/index.d.ts       an API, which programs import as @api/travel
+├── api/tau/index.d.ts          the tau API
+├── node_modules/trip-search/   a package of its own, built on @api/travel
+└── taus/city-guide/            the author's own: here, a tau it runs
 ```
 
 `tau.json`:
 
 ```json
 {
-  "description": "Count the words of a file, and write the most frequent.",
+  "description": "Plan and book a trip for a group, and write its itinerary.",
   "params": {
-    "notes":  { "type": "file", "mode": "in",  "description": "The file to count." },
-    "top":    { "type": "text", "description": "How many words to list." },
-    "counts": { "type": "file", "mode": "out", "description": "The most frequent words." }
+    "cities": { "type": "list", "of": { "type": "text" }, "description": "Where to go, in order." },
+    "dates": {
+      "type": "record",
+      "fields": { "start": { "type": "text" }, "end": { "type": "text" } },
+      "description": "When the trip starts and ends."
+    },
+    "travelers": {
+      "type": "list",
+      "of": {
+        "type": "record",
+        "fields": {
+          "name": { "type": "text" },
+          "home": { "type": "text" },
+          "nationality": { "type": "text" }
+        }
+      },
+      "description": "Who goes, and where each sets out from."
+    },
+    "wishes": { "type": "file", "mode": "in", "description": "What the group likes and avoids." },
+    "trip": { "type": "dir", "mode": "inout", "description": "The trip's bookings." },
+    "itinerary": { "type": "file", "mode": "out", "description": "The plan, day by day." }
   },
-  "exposes": ["@api/stats"]
+  "exposes": ["trip-search", "@api/tau"]
 }
 ```
 
 `PROMPT.md`:
 
 ```
-With the stats API, count the words of ${notes}, and write the ${top} most frequent to ${counts}.
+Plan a trip through ${cities}, from ${dates.start} to ${dates.end}, for the travelers your programs
+read through the tau API, each setting out from their home, and check the visas each needs. Keep
+to ${wishes}. Book it with trip-search, saving each booking in ${trip}, and write the plan, day by
+day, to ${itinerary}. Then have the tau at ${self}/taus/city-guide write a guide to each city, with
+the same wishes, into ${trip}.
 ```
 
 A call gives a value for each parameter, as JSON:
 
 ```json
-{ "notes": { "$in": "notes.txt" }, "top": "10", "counts": { "$out": "counts.txt" } }
+{
+  "cities": ["Lisbon", "Porto"],
+  "dates": { "start": "2027-05-01", "end": "2027-05-08" },
+  "travelers": [
+    { "name": "Ana", "home": "Madrid", "nationality": "Spanish" },
+    { "name": "Ben", "home": "Toronto", "nationality": "Canadian" }
+  ],
+  "wishes": { "$in": "wishes.md" },
+  "trip": { "$inout": "portugal" },
+  "itinerary": { "$out": "itinerary.md" }
+}
 ```
 
-- `params` are what the caller gives, each by name, all required: a `text`; a **handle** to a
-  `file`, `dir`, or `path` (either) of the caller's, which the agent reads (`in`), writes (`out`),
-  or changes in place (`inout`); or a `list` or a `record` of such values, to any depth.
-- In the prompt, `${name}` becomes a text's value, a handle's path where the agent sees it, or a
-  list of either, as a JSON array; `${a.b}`, a field of a closed record; `${self}`, where the tau's
-  own directory is; and `$${`, a literal `${`. Records, and lists of lists or records, are not in
-  the prompt: the agent's programs read them, through the tau API.
-- `exposes` lists what the agent's programs import, by default every API.
-
-More: [Directory](docs/spec/directory.md), [Metadata](docs/spec/metadata.md),
-[Values](docs/spec/values.md), [Prompt](docs/spec/prompt.md), [APIs](docs/spec/apis.md),
-[Packages](docs/spec/packages.md).
+- `params` are what the caller gives, all required: a `text`; a **handle**,
+  `{"$in" | "$out" | "$inout": path}`, to a `file`, `dir`, or `path` (either) of the caller's, which
+  the agent reads, leaves something at, or changes in place; a `list` `of` a type; or a `record`,
+  closed with its `fields`, or open. Types nest to any depth.
+- The prompt is expanded once for the run: `${name}` becomes a text, a handle's path where the
+  agent sees it, or a list of either, as a JSON array; `${a.b}`, a field of a closed record;
+  `${self}`, the tau's own directory, which the agent reads but does not change; and `$${`, a
+  literal `${`. The rest, such as `travelers`, the agent's programs read through the tau API.
+- An API is declared in `api/<name>/` as TypeScript, whose doc comments say what it does, and the
+  runtime implements it, so the tau holds neither its code nor credentials. `node_modules/` holds
+  packages built on the APIs. The agent's programs, in TypeScript for Node.js 24 or later, import
+  what `exposes` lists, by default every API.
+- The **tau API**, `@api/tau`, gives programs `values()`, the run's values, each handle as its path
+  where the agent sees it, and `run(tau, values)`, which runs another tau and resolves to how it
+  ended.
+- Each directory with a `SKILL.md` in `skills/`, at any depth, is a skill the agent can use.
 
 ## Semantics
 
-A tau specifies an agent's interface, not how it runs: the instructions the model receives, the
-files it is given as input, the output and file changes expected of it, and the actions it may
-take that have visible effects.
+A **runtime** runs a tau for a **caller**: a person, a program, or another agent.
 
-### A run
+- **A call** gives every parameter a value. A runtime refuses one it cannot carry out as declared:
+  a value or a path that does not fit, an API it has no implementation of.
+- **The run succeeds** if the agent finishes on its own, neither stopped nor failing, and leaves a
+  file or a directory, as declared, at each `out` and `inout` handle. The caller's paths then hold
+  what it left, a directory merging into one already there. Either way, the caller gets the
+  outcome, why if it failed, and the agent's final text. Success says the agent finished, not that
+  it did well: a tau that must say so does it in its `out`s or its text.
+- **Its effects are its final text, its `out` and `inout` handles, and its API calls**, which take
+  effect when made, and stay if the run fails. What the agent writes anywhere else is scratch. It
+  learns of the caller only what the call gives it.
+- **Runs nest.** An agent that runs a tau is that run's caller, giving paths in its own view. A
+  handle carries its mode, so the agent can pass on a value it was given as it is, and it can make
+  several runs at once.
 
-1. **Call.** The caller gives every parameter a value. A runtime refuses a call it cannot carry out
-   as declared: a value that does not fit its type, a handle whose path does not fit its mode, an
-   API it has no implementation of.
-2. **Start.** The runtime gives the agent each handle, where it chooses, keeping its base name:
-   the caller's own file or directory, or a copy; and the tau's directory at `${self}`, to read but
-   not change.
-3. **Work.** The agent works on the prompt, values substituted. It reads its `in` handles, leaves
-   at its `out`s what goes there, changes its `inout`s in place, uses its skills, and writes
-   programs, in TypeScript for Node.js 24 or later, that import what the tau exposes, each API
-   through the runtime's implementation.
-4. **End.** The run succeeds if the agent finishes on its own, neither stopped nor failing, and
-   leaves at each `out` and `inout` handle a file or a directory as declared. By the time the
-   caller learns it, each of those paths holds what the agent left: a copy is put there, a
-   directory merging into a directory already there. Either way, the caller gets the outcome, why
-   if it failed, and the agent's final text, and nothing else. Success says the agent finished,
-   not that it did well: a tau that must say so does it in its `out`s or its text.
-
-### What a run promises
-
-- **Its effects are its final text, its `out` and `inout` handles, and its API calls.** It
-  changes no path of the caller's but those its values hand it to write, so a runtime can list
-  them before it starts. API calls take effect when made, and stay if the run fails.
-- **Copying or not is the runtime's.** A tau relies on nothing that sets them apart: whether the
-  caller's later changes reach the agent, what an `out`'s place holds at first, and whether the
-  agent's changes reach the caller's paths as it makes them or once the run succeeds, so what a
-  failed run leaves there. A caller that needs all or nothing gives fresh `out` paths, and moves
-  them once the run succeeds.
-- **The caller's paths may overlap.** Whether the agent sees through one what it does through
-  another is not specified; copies are put once every `in` was read, inner paths last.
-- **A handle holds all it leads to.** Its path is never a symlink itself, and a symlink in a
-  directory is relative, and leads, through any others, to something inside that directory: an
-  `in` or `inout` that breaks this refuses the call; an `out` or `inout` left breaking it fails
-  the run. A copy keeps modes and such symlinks.
-- **The agent learns of the caller only what the call gives it**: texts, and the files and
-  directories its handles name. Never the caller's environment or working directory. What it
-  writes anywhere else is scratch: a runtime may keep it or throw it away, and nothing after the
-  run relies on it.
-
-### What it leaves to the runtime
-
-A tau says what its agent needs, never how it gets it, so a runtime is free to choose:
-- **Where the run happens**: on the caller's machine or another, in a sandbox or not, inside
-  another run or not, alongside any number of others.
-- **How each handle is given**: the caller's own file or directory, at its path or mounted
-  elsewhere, or a copy, made eagerly, lazily, or copy-on-write; and where the working directory
-  and the tau's directory are. The tau's directory, which no run changes, can be shared by all its runs, and prepared
-  ahead.
-- **How each API is implemented**: in the program's process or behind a channel, acting on
-  whatever the runtime binds it to, with credentials the tau never holds. Wherever it runs, its
-  calls mean what its declarations say, in the program's terms: a path names a file of the view.
-- **How the model is driven**: which model, what tools it reads, writes and runs programs with,
-  and how its skills and what the tau exposes are shown to it.
-- **What else the agent finds**: commands, the network, other files. A tau that relies on them
-  runs only where a runtime gives them.
-
-An **isolated** runtime keeps these promises whatever the agent does, since the agent reaches
-nothing of the caller's but its handles and its APIs, and it may hold the agent to each handle's
-mode. An **unisolated** one runs the agent with the caller's own access, and keeps them only as far
-as the agent keeps to its handles.
-
-More: [Implementations](docs/spec/implementations.md), [Running](docs/spec/running.md),
-[Results](docs/spec/results.md), [Paths](docs/spec/paths.md), [Runtimes](docs/spec/runtimes.md),
-[The tau API](docs/spec/tau-api.md).
+A tau says what its agent needs, never how: where it runs, which model and tools drive it, how its
+skills and APIs are shown to it and implemented, and what else it finds, such as commands or the
+network, are the runtime's. So is whether a handle is the caller's own file or a copy, so a tau
+relies on nothing that sets them apart: whether the caller's later changes reach the agent, what an
+`out` holds at first, and what a failed run leaves at the caller's paths. An isolated runtime keeps
+these promises whatever the agent does; an unisolated one, which runs the agent with the caller's
+access, only as far as the agent keeps to its handles.
