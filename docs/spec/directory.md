@@ -4,7 +4,7 @@
 my-agent/
 ├── PROMPT.md            # required: the prompt (prompt.md)
 ├── tau.json             # optional: what it takes and gives (metadata.md)
-├── skills/              # optional: skills, each a directory with a SKILL.md, at any depth
+├── skills/              # optional: skills, each a directory in it with a SKILL.md
 ├── api/                 # optional: the APIs, a directory each (apis.md)
 │   └── notes/
 │       ├── index.d.ts

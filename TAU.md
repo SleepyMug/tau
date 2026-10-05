@@ -89,7 +89,7 @@ A call gives a value for each parameter, as JSON:
 - The **tau API**, `@api/tau`, gives programs `values()`, the run's values, each handle as its path
   where the agent sees it, and `run(tau, values)`, which runs another tau and resolves to how it
   ended.
-- Each directory with a `SKILL.md` in `skills/`, at any depth, is a skill the agent can use.
+- Each directory `skills/<name>/` with a `SKILL.md` is a skill the agent can use.
 
 ## Semantics
 
