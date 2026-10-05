@@ -1,7 +1,9 @@
 import { existsSync, lstatSync, readFileSync, type Stats, statSync } from "node:fs";
 import path from "node:path";
-import { API_SCOPE } from "./api.js";
 import { linkProblems, valueLinkProblems } from "./links.js";
+
+/** How the agent's programs import an API: `@api/<name>` (docs/spec/apis.md). */
+export const API_SCOPE = "@api/";
 
 /**
  * What the agent does with a handle's file or directory (docs/spec/values.md): `in`, reads it;

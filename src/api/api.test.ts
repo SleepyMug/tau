@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { checkImplementation, loadApis } from "./index.js";
+import { checkImplementation, loadApis } from "../index.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-api-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));

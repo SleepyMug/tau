@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
-import { API_SCOPE, type Api, apiPaths, format, memoryHost, message, OPTIONS, packageDescription } from "./api.js";
-import { inside } from "./links.js";
-import type { Tau } from "./tau.js";
+import { type Api, apiPaths, format, memoryHost, message, OPTIONS, packageDescription } from "./api.js";
+import { inside } from "../tau/links.js";
+import { API_SCOPE, type Tau } from "../tau/tau.js";
 
 /** What a tau exposes to the agent's programs (docs/spec/packages.md): one of its APIs, or a package of its own. */
 export type Exposed =

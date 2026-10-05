@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { checkInputs, checkOutputs, loadTau } from "./index.js";
+import { checkInputs, checkOutputs, loadTau } from "../index.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-metadata-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));

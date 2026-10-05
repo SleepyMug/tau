@@ -1,6 +1,7 @@
-export { API_SCOPE, type Api, checkImplementation, loadApis } from "./api.js";
-export { type Exposed, loadExposed } from "./exposed.js";
+export { type Api, checkImplementation, loadApis } from "./api/api.js";
+export { type Exposed, loadExposed } from "./api/exposed.js";
 export {
+	API_SCOPE,
 	type BoundHandle,
 	type Caller,
 	checkInputs,
@@ -14,4 +15,4 @@ export {
 	type Tau,
 	type Type,
 	type Value,
-} from "./tau.js";
+} from "./tau/tau.js";

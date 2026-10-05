@@ -2,10 +2,8 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "n
 import { createRequire } from "node:module";
 import path from "node:path";
 import ts from "typescript";
-import { inside } from "./links.js";
-
-/** How the agent's programs import an API: `@api/<name>` (docs/spec/apis.md). */
-export const API_SCOPE = "@api/";
+import { inside } from "../tau/links.js";
+import { API_SCOPE } from "../tau/tau.js";
 
 /** An API a tau declares in its directory `api/<name>/`, checked against the spec. */
 export interface Api {
