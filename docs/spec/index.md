@@ -31,4 +31,5 @@ parts and from which they would be built into this one, is a work in progress.
   - [Runtimes](runtimes.md): what each runtime presents to the model.
   - [The tau API](tau-api.md): how the agent's programs read the run's values, and run other taus.
   - [Serialization](serialization.md): a run's call and result as archives, to send elsewhere.
-- [Library](library.md): `@sleepymug/tau`, which reads and checks a tau for runtimes.
+- [Library](library.md): `@sleepymug/tau`, which reads and checks a tau for runtimes, and packs a
+  run as a call and a result.

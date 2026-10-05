@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./call": {
+      "types": "./dist/call/index.d.ts",
+      "import": "./dist/call/index.js"
     }
   },
   "files": [

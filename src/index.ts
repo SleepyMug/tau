@@ -16,3 +16,4 @@ export {
 	type Type,
 	type Value,
 } from "./tau/tau.js";
+export * from "./call/index.js";

@@ -6,7 +6,8 @@ implements.
 
 - [TAU.md](TAU.md): taus in brief: their layout, and what a run means.
 - [docs/spec/](docs/spec/index.md): the spec.
-- This package, `@sleepymug/tau`, reads and checks a tau for runtimes written in TypeScript: see
+- This package, `@sleepymug/tau`, reads and checks a tau for runtimes written in TypeScript, and
+  packs a run as a call and a result, for a runtime whose agent works elsewhere: see
   [docs/spec/library.md](docs/spec/library.md).
 
 ## Commands

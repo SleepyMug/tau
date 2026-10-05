@@ -3,8 +3,8 @@
 A run can travel as bytes, to a runtime on another machine and back, in two formats: a **call**,
 the values and the content of the handles the agent reads, and a **result**, how the run ended and
 the content the agent left at its `$out` and `$inout` handles. Each stands alone, and holds its
-content in its own blobs: a result is read without its call. Neither holds the tau: how a runtime
-gets the tau a call runs is not this format's.
+content in its own blobs: a result is read without its call. A call may carry the tau it runs, for
+a runtime that does not have it otherwise; a result never does.
 
 Each is an archive, written and read in one pass, so a large file never has to be held whole.
 
@@ -32,7 +32,8 @@ Compressing the archive, as a whole, is up to whatever carries it.
 
 ## Calls
 
-`call.json` holds a run's values, by parameter, under `values`, and no other key:
+`call.json` holds a run's values, by parameter, under `values`, the tau it runs under `tau`, when
+it carries it, and no other key:
 
 ```json
 {
@@ -41,7 +42,8 @@ Compressing the archive, as a whole, is up to whatever carries it.
     "top":    "10",
     "site":   { "$inout": { "name": "site",      "kind": "dir",  "blob": "b1" } },
     "counts": { "$out":   { "name": "counts.txt" } }
-  }
+  },
+  "tau": { "kind": "dir", "blob": "t" }
 }
 ```
 
@@ -63,10 +65,19 @@ content := {"kind": "file" | "dir", "blob": id}
 
 An `$out` handle carries no content, since what its place holds at first is not specified.
 Several handles may name the same blob: each place is given the blob's content, as if from a copy
-of its own. Every blob in the archive is named by a handle.
+of its own.
+
+`tau` is a `content` of kind `dir`: the tau's directory, as [Directory](directory.md) has it,
+whose symlinks lead inside it. Its blob may come first, so that a runtime can read the tau, and
+check the values against it, before it reads the handles' blobs.
+
+Every blob in the archive is named by a handle, or by `tau`.
 
 ```
 call.json
+blobs/t/
+blobs/t/PROMPT.md
+blobs/t/tau.json
 blobs/b0
 blobs/b1/
 blobs/b1/index.html
@@ -124,5 +135,8 @@ already there, anything else replacing what is there.
   can fetch, which asks for a canonical digest of a directory; `{"url": "…"}`.
 - Whether times are kept, for a tau whose programs rely on them.
 - Whether a reader accepts GNU long-name entries, which GNU tar writes by default, as well as pax.
+- Whether zero blocks may follow the two that end the archive: tar pads an archive to its record
+  size, 10 KiB by default, so an archive it writes is read only when written one block a record
+  (`tar -b1`).
 - The kind of an `$out` handle no type declares (see [Values](values.md)), which a call could
   carry, as `{"$out": {"name": "r.md", "kind": "file"}}`.

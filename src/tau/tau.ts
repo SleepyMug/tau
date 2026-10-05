@@ -49,7 +49,9 @@ export interface Tau {
 	 * One run: `values`, by parameter, checked against `params`; each handle's path resolved against
 	 * `caller.cwd`, and given its place by `place`, called for each handle in the order of the values,
 	 * by default the path itself; and the prompt expanded, with `${self}` where the agent sees the
-	 * tau's own directory, `self`, by default `dir`. Throws TypeError, listing every problem.
+	 * tau's own directory, `self`, by default `dir`. A handle may also be as a call has it
+	 * (docs/spec/serialization.md), naming its content in place of a path, whose kind is checked
+	 * against its type, and which `place` then places. Throws TypeError, listing every problem.
 	 */
 	bind(values: unknown, caller: Caller, place?: (handle: Placing) => string, self?: string): Run;
 }
@@ -64,11 +66,20 @@ export interface Caller {
 export interface Placing {
 	/** Where it lies in the values: `site`, `edits[0]`, `args.src`. */
 	readonly at: string;
+	/** Where it lies in the values, as a JSON Pointer, as a result names it: `/site`, `/edits/0`, `/args/src`. */
+	readonly pointer: string;
 	readonly mode: Mode;
-	/** What its type declares it is; `path`, either, where no type declares it. */
+	/**
+	 * What its type declares it is; `path`, either, where no type declares it, unless it is a call's,
+	 * whose content says.
+	 */
 	readonly kind: Kind;
-	/** The caller's path, absolute. */
-	readonly host: string;
+	/** The base name of the caller's path, which its place keeps. */
+	readonly name: string;
+	/** The caller's path, absolute; none for a call's handle, which names its content instead. */
+	readonly host?: string;
+	/** A call's `$in` or `$inout` handle's content: its blob in the call. */
+	readonly blob?: string;
 }
 
 /** A handle in a run's values, placed. */
@@ -127,10 +138,10 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		params,
 		exposes,
-		bind(values, caller, place = ({ host }) => host, self = absolute) {
+		bind(values, caller, place = placeAtHost, self = absolute) {
 			const problems: string[] = [];
 			const handles: BoundHandle[] = [];
-			const fit = (value: unknown, type: Type | undefined, at: string): Value | undefined => {
+			const fit = (value: unknown, type: Type | undefined, at: string, pointer: string): Value | undefined => {
 				const problem = (text: string): undefined => {
 					problems.push(`${at}: ${text}`);
 					return undefined;
@@ -140,13 +151,23 @@ export function loadTau(dir: string): Tau {
 					const [key, ...more] = Object.keys(value);
 					const mode = key?.slice(1) as Mode;
 					const host = value[key as string];
-					if (more.length > 0 || !MODES.includes(mode) || typeof host !== "string")
+					const content = isObject(host) ? callContent(host, mode) : undefined;
+					if (more.length > 0 || !MODES.includes(mode) || (typeof host !== "string" && content === undefined))
 						return problem(`${JSON.stringify(value)} is not a handle, which is {"$in" | "$out" | "$inout": <path>}`);
 					if (type !== undefined && type.type !== "file" && type.type !== "dir" && type.type !== "path")
 						return problem(`is a handle, where ${describe(type)} goes`);
 					if (type !== undefined && type.mode !== mode) return problem(`is an $${mode} handle, where an $${type.mode} one goes`);
-					if (host === "") return problem("a handle's path cannot be empty");
-					const placing: Placing = { at, mode, kind: type?.type ?? "path", host: path.resolve(caller.cwd, host) };
+					let placing: Placing;
+					if (content !== undefined) {
+						const declared = type?.type ?? "path";
+						if (content.kind !== undefined && declared !== "path" && content.kind !== declared)
+							return problem(`holds a ${content.kind === "dir" ? "directory" : "file"}, where ${declared === "dir" ? "a directory" : "a file"} goes`);
+						placing = { at, pointer, mode, kind: content.kind ?? declared, name: content.name, ...(content.blob === undefined ? {} : { blob: content.blob }) };
+					} else {
+						if (host === "") return problem("a handle's path cannot be empty");
+						const resolved = path.resolve(caller.cwd, host as string);
+						placing = { at, pointer, mode, kind: type?.type ?? "path", name: path.basename(resolved), host: resolved };
+					}
 					const view = place(placing);
 					handles.push({ ...placing, view });
 					return { [`$${mode}`]: view } as Handle;
@@ -154,15 +175,15 @@ export function loadTau(dir: string): Tau {
 				if (typeof value === "string") return type === undefined || type.type === "text" ? value : problem(`is a text, where ${describe(type)} goes`);
 				if (Array.isArray(value)) {
 					if (type !== undefined && type.type !== "list") return problem(`is a list, where ${describe(type)} goes`);
-					const items = value.map((item, index) => fit(item, type?.of, `${at}[${index}]`));
+					const items = value.map((item, index) => fit(item, type?.of, `${at}[${index}]`, `${pointer}/${index}`));
 					return items.every((item) => item !== undefined) ? items : undefined;
 				}
 				if (!isObject(value)) return problem(`${JSON.stringify(value)} is not a value: a text, a handle, a list or a record`);
 				if (type !== undefined && type.type !== "record") return problem(`is a record, where ${describe(type)} goes`);
-				return fitRecord(value, type?.fields, at, fit, problem);
+				return fitRecord(value, type?.fields, at, pointer, fit, problem);
 			};
 			const bound = isObject(values)
-				? fitRecord(values, params, "", fit, (text) => {
+				? fitRecord(values, params, "", "", fit, (text) => {
 						problems.push(text);
 						return undefined;
 					})
@@ -175,7 +196,25 @@ export function loadTau(dir: string): Tau {
 }
 
 /** What `fit` makes of a value: its handles placed, or undefined once its problem is recorded. */
-type Fit = (value: unknown, type: Type | undefined, at: string) => Value | undefined;
+type Fit = (value: unknown, type: Type | undefined, at: string, pointer: string) => Value | undefined;
+
+/** Where a handle is by default: the caller's path itself, which a call's handle has not. */
+function placeAtHost({ at, host }: Placing): string {
+	if (host === undefined) throw new TypeError(`${at}: a call's handle names no path of the caller's, so the runtime places it`);
+	return host;
+}
+
+/**
+ * A call's handle's content (docs/spec/serialization.md): `{name, kind, blob}` for an `$in` or an
+ * `$inout`, `{name}` for an `$out`; or undefined when it is not one.
+ */
+function callContent(value: Record<string, unknown>, mode: Mode): { name: string; kind?: "file" | "dir"; blob?: string } | undefined {
+	const { name, kind, blob, ...rest } = value;
+	if (Object.keys(rest).length > 0 || typeof name !== "string" || name === "" || name === "." || name === ".." || /[/\0]/u.test(name)) return undefined;
+	if (mode === "out") return kind === undefined && blob === undefined ? { name } : undefined;
+	if ((kind !== "file" && kind !== "dir") || typeof blob !== "string") return undefined;
+	return { name, kind, blob };
+}
 
 /**
  * A record's values fitted to `fields`: exactly those when it has them, or else any, each named as a
@@ -185,6 +224,7 @@ function fitRecord(
 	record: Record<string, unknown>,
 	fields: { readonly [name: string]: Type } | undefined,
 	at: string,
+	pointer: string,
 	fit: Fit,
 	problem: (text: string) => undefined,
 ): { readonly [name: string]: Value } | undefined {
@@ -203,7 +243,7 @@ function fitRecord(
 	const fitted: Record<string, Value> = {};
 	for (const [name, value] of Object.entries(record)) {
 		if (fields !== undefined && !Object.hasOwn(fields, name)) continue;
-		const result = fit(value, fields?.[name], within(name));
+		const result = fit(value, fields?.[name], within(name), `${pointer}/${name}`);
 		if (result === undefined) fits = false;
 		else fitted[name] = result;
 	}
@@ -233,6 +273,8 @@ function describe(type: Type): string {
 export function checkInputs(run: Run): void {
 	const problems: string[] = [];
 	for (const { at, mode, kind, host } of run.handles) {
+		// A call's handle names content, which its reader checked.
+		if (host === undefined) continue;
 		if (mode !== "out") {
 			problems.push(...valueProblems(host, kind).map((problem) => `${at}: ${problem}`));
 			continue;

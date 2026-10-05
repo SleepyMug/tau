@@ -67,10 +67,10 @@ Then write each changed file, and how many replacements it got, to /home/u/out/r
 `,
 	);
 	assert.deepEqual(run.handles, [
-		{ at: "site", mode: "inout", kind: "dir", host: "/home/u/site", view: "/home/u/site" },
-		{ at: "rules", mode: "in", kind: "file", host: "/home/u/style.md", view: "/home/u/style.md" },
-		{ at: "report", mode: "out", kind: "file", host: "/home/u/out/report.md", view: "/home/u/out/report.md" },
-		{ at: "opts.style", mode: "in", kind: "path", host: "/guides/house", view: "/guides/house" },
+		{ at: "site", pointer: "/site", mode: "inout", kind: "dir", name: "site", host: "/home/u/site", view: "/home/u/site" },
+		{ at: "rules", pointer: "/rules", mode: "in", kind: "file", name: "style.md", host: "/home/u/style.md", view: "/home/u/style.md" },
+		{ at: "report", pointer: "/report", mode: "out", kind: "file", name: "report.md", host: "/home/u/out/report.md", view: "/home/u/out/report.md" },
+		{ at: "opts.style", pointer: "/opts/style", mode: "in", kind: "path", name: "house", host: "/guides/house", view: "/guides/house" },
 	]);
 	assert.deepEqual(run.values, {
 		site: { $inout: "/home/u/site" },
@@ -82,14 +82,22 @@ Then write each changed file, and how many replacements it got, to /home/u/out/r
 
 	// A runtime that copies places each handle where it likes, asked in the order of the values.
 	const asked: string[] = [];
-	const placed = tau.bind(VALUES, caller, ({ at, host }) => {
+	const placed = tau.bind(VALUES, caller, ({ at, name }) => {
 		asked.push(at);
-		return path.join("/work", String(asked.length), path.basename(host));
+		return path.join("/work", String(asked.length), name);
 	});
 	assert.deepEqual(asked, ["site", "rules", "report", "opts.style"]);
 	assert.match(placed.prompt, /^Make the replacements in \/work\/1\/site, following \/work\/2\/style\.md and \/work\/4\/house,/u);
 	assert.deepEqual(placed.values.report, { $out: "/work/3/report.md" });
-	assert.deepEqual(placed.handles[2], { at: "report", mode: "out", kind: "file", host: "/home/u/out/report.md", view: "/work/3/report.md" });
+	assert.deepEqual(placed.handles[2], {
+		at: "report",
+		pointer: "/report",
+		mode: "out",
+		kind: "file",
+		name: "report.md",
+		host: "/home/u/out/report.md",
+		view: "/work/3/report.md",
+	});
 });
 
 test("the values must fit the types, listing every problem", () => {
