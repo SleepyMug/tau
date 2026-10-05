@@ -25,7 +25,8 @@ A call or a result is a tar archive in the POSIX.1-2001 pax format, restricted a
 - Of each entry's header, a reader keeps the name, the type, the size, the permission bits
   (`mode & 0o777`) and a symlink's target, and ignores the rest: owners, times, and any other mode
   bits.
-- The archive ends with the two zero blocks tar ends with, and nothing follows them.
+- The archive ends with the two zero blocks tar ends with, and nothing but zero bytes follows
+  them, as tar pads an archive to its record size.
 
 A reader refuses an archive that breaks any of these, or whose JSON does not fit what follows.
 Compressing the archive, as a whole, is up to whatever carries it.
@@ -135,8 +136,5 @@ already there, anything else replacing what is there.
   can fetch, which asks for a canonical digest of a directory; `{"url": "…"}`.
 - Whether times are kept, for a tau whose programs rely on them.
 - Whether a reader accepts GNU long-name entries, which GNU tar writes by default, as well as pax.
-- Whether zero blocks may follow the two that end the archive: tar pads an archive to its record
-  size, 10 KiB by default, so an archive it writes is read only when written one block a record
-  (`tar -b1`).
 - The kind of an `$out` handle no type declares (see [Values](values.md)), which a call could
   carry, as `{"$out": {"name": "r.md", "kind": "file"}}`.

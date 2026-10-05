@@ -66,8 +66,9 @@ test("tar reads what is written, and what it writes in the pax format is read", 
 	writeFileSync(path.join(dir, "result.json"), "{}");
 	writeFileSync(path.join(dir, "blobs/b1/sub", "ä".repeat(60)), "long\n");
 	symlinkSync(`sub/${"ä".repeat(60)}`, path.join(dir, "blobs/b1/link"));
-	// One block a record, so that nothing follows the two zero blocks.
-	const bytes = execFileSync("tar", ["--format=pax", "-b1", "-cf", "-", "-C", dir, "result.json", "blobs"]);
+	// Padded to tar's record size, 10 KiB, with zeros.
+	const bytes = execFileSync("tar", ["--format=pax", "-cf", "-", "-C", dir, "result.json", "blobs"]);
+	assert.equal(bytes.length % 10240, 0);
 	const entries = (await read(bytes)) as { name: string; type: string; target?: string }[];
 	// tar lists a directory's entries in no set order.
 	assert.deepEqual(entries.map(({ name, type }) => `${name} ${type}`).sort(), [
@@ -98,7 +99,8 @@ test("an archive that breaks the spec is refused, naming why", async () => {
 
 	await refused(one.subarray(0, one.length - 1024), /ends without the two zero blocks/u);
 	await refused(one.subarray(0, one.length - 512), /a zero block is not followed by another/u);
-	await refused(Buffer.concat([one, Buffer.alloc(512)]), /bytes after its end/u);
+	assert.equal((await read(Buffer.concat([one, Buffer.alloc(512 * 17)]))).length, 1);
+	await refused(Buffer.concat([one, Buffer.alloc(511), Buffer.from([1])]), /bytes other than zeros after its end/u);
 	await refused(Buffer.concat([one.subarray(0, 512), one.subarray(0, 1)]), /ends in its bytes|ends without/u);
 	const corrupt = Buffer.from(one);
 	corrupt[0] = 0x41;

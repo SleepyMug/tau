@@ -4,7 +4,7 @@ import { Buffer } from "node:buffer";
  * The tar archives that calls and results are (docs/spec/serialization.md): the POSIX.1-2001 pax
  * format, as far as they use it. Regular files, directories and symlinks, a pax extended header
  * (`x`) for a name or a size that does not fit the ustar header, and the two zero blocks at the end,
- * with nothing after them. Written and read in one pass.
+ * with nothing but the zeros of tar's padding after them. Written and read in one pass.
  */
 
 /** What an entry is: all an archive of this spec holds. */
@@ -74,7 +74,8 @@ export async function* writeTar(entries: AsyncIterable<WriteEntry> | Iterable<Wr
 
 /**
  * The entries of an archive, checked as they are read: every entry is a regular file, a directory or
- * a symlink, named as the spec has it, and the archive ends with two zero blocks and nothing after.
+ * a symlink, named as the spec has it, and the archive ends with two zero blocks, and nothing but
+ * zero bytes after.
  * Throws {@link ArchiveError}, naming `what`, for an archive that breaks it.
  */
 export async function* readTar(bytes: AsyncIterable<Uint8Array>, what = "the archive"): AsyncGenerator<TarEntry> {
@@ -90,7 +91,7 @@ export async function* readTar(bytes: AsyncIterable<Uint8Array>, what = "the arc
 			const second = await input.exactly(BLOCK);
 			if (second === undefined || !second.every((byte) => byte === 0)) return refuse("a zero block is not followed by another");
 			if (extended !== undefined) return refuse("it ends after a pax extended header");
-			if (!(await input.atEnd())) return refuse("there are bytes after its end");
+			if (!(await input.onlyZeros())) return refuse("there are bytes other than zeros after its end");
 			return;
 		}
 		const problem = headerProblem(head);
@@ -289,10 +290,13 @@ class Input {
 		return taken;
 	}
 
-	/** Whether no byte is left. */
-	async atEnd(): Promise<boolean> {
-		while (this.buffered.length === 0) if (!(await this.fill())) return true;
-		return false;
+	/** Whether every byte left, if any, is zero, reading them all. */
+	async onlyZeros(): Promise<boolean> {
+		for (;;) {
+			if (!this.buffered.every((byte) => byte === 0)) return false;
+			this.buffered = Buffer.alloc(0);
+			if (!(await this.fill())) return true;
+		}
 	}
 
 	/** The next `count` bytes as they come, readable once; `short` throws when fewer are left. */
