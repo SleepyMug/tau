@@ -4,7 +4,8 @@
 takes, its skills, and TypeScript declarations of the APIs it needs, which a runtime such as pi-run
 implements.
 
-- [TAU.md](TAU.md): taus in brief: their layout, and what a run means.
+- [TAU.md](TAU.md): taus in brief: their layout, and what a run means. The package exports it as
+  `@sleepymug/tau/TAU.md`, for a runtime to give its agents.
 - [docs/spec/](docs/spec/index.md): the spec.
 - This package, `@sleepymug/tau`, reads and checks a tau for runtimes written in TypeScript, and
   packs a run as a call and a result, for a runtime whose agent works elsewhere: see
