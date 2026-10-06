@@ -91,6 +91,10 @@ A call gives a value for each parameter, as JSON:
   where the agent sees it, and `run(tau, values)`, which runs another tau and resolves to how it
   ended.
 - Each directory `skills/<name>/` with a `SKILL.md` is a skill the agent can use.
+- `init`, optional in `tau.json`, is a command the runtime runs in the tau's directory before the
+  agent, as a program the agent runs: exiting 0, it did the run, its stdout the final text, and the
+  agent does not run; 100, the agent runs as it would without it; 101, or any other ending, it
+  failed, and the agent runs, told so, with what it wrote.
 
 ## Semantics
 
@@ -98,11 +102,12 @@ A **runtime** runs a tau for a **caller**: a person, a program, or another agent
 
 - **A call** gives every parameter a value. A runtime refuses one it cannot carry out as declared:
   a value or a path that does not fit, an API it has no implementation of.
-- **The run succeeds** if the agent finishes on its own, neither stopped nor failing, and leaves a
-  file or a directory, as declared, at each `out` and `inout` handle. The caller's paths then hold
-  what it left, a directory merging into one already there. Either way, the caller gets the
-  outcome, why if it failed, and the agent's final text. Success says the agent finished, not that
-  it did well: a tau that must say so does it in its `out`s or its text.
+- **The run succeeds** if the agent finishes on its own, neither stopped nor failing, or its init
+  does the run in its place, and leaves a file or a directory, as declared, at each `out` and
+  `inout` handle. The caller's paths then hold what it left, a directory merging into one already
+  there. Either way, the caller gets the outcome, why if it failed, and the agent's final text, or
+  init's. Success says the agent finished, not that it did well: a tau that must say so does it in
+  its `out`s or its text.
 - **Its effects are its final text, its `out` and `inout` handles, and its API calls**, which take
   effect when made, and stay if the run fails. What the agent writes anywhere else is scratch. It
   learns of the caller only what the call gives it.

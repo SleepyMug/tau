@@ -1,6 +1,6 @@
 # Metadata
 
-`tau.json` declares what a tau takes from its caller, and what its programs import. Without it, a
+`tau.json` declares what a tau takes from its caller, what its programs import, and its init. Without it, a
 tau takes no parameters, and its programs import every API.
 
 ```json
@@ -36,6 +36,8 @@ Each key is optional, and any other is refused:
 - **`exposes`** names what the agent's programs import, each once: an API, as `@api/<name>` (see
   [APIs](apis.md)), or a package of the tau's own, by its name (see [Packages](packages.md)).
   Without it, they import every API.
+- **`init`** is a command, a string that is not blank, that a runtime runs before the agent, and
+  which may do the run without it (see [Init](init.md)).
 
 ## Types
 

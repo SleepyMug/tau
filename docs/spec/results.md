@@ -1,7 +1,7 @@
 # Results
 
 A run succeeds when the agent **returns normally**, running to its end without being stopped or
-failing, and leaves at the place of each `$out` and `$inout` handle what [Paths](paths.md) asks.
+failing, or, without the agent, when the tau's init skips it (see [Init](init.md)), and leaves at the place of each `$out` and `$inout` handle what [Paths](paths.md) asks.
 By the time the caller learns that the run succeeded, the path of each holds what the agent left
 there: as the agent left it, at a place that is the caller's own, or else put there from a copy:
 a directory merges into a directory already there, each of its entries put the same way, and

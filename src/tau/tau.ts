@@ -46,6 +46,11 @@ export interface Tau {
 	 */
 	readonly exposes: readonly string[] | undefined;
 	/**
+	 * The command a runtime runs, with `sh -c` in the tau's own directory, before the agent, which
+	 * may do the run without it (docs/spec/init.md); undefined without one.
+	 */
+	readonly init: string | undefined;
+	/**
 	 * One run: `values`, by parameter, checked against `params`; each handle's path resolved against
 	 * `caller.cwd`, and given its place by `place`, called for each handle in the order of the values,
 	 * by default the path itself; and the prompt expanded, with `${self}` where the agent sees the
@@ -121,7 +126,7 @@ export function loadTau(dir: string): Tau {
 	if (!existsSync(promptFile)) throw new Error(`${absolute}: not a tau (no PROMPT.md)`);
 	const metadataFile = path.join(absolute, "tau.json");
 	const metadata = existsSync(metadataFile) ? readMetadata(metadataFile) : undefined;
-	const { description, params = {}, exposes } = metadata ?? {};
+	const { description, params = {}, exposes, init } = metadata ?? {};
 	const prompt = readFileSync(promptFile, "utf8");
 	let template: Template;
 	try {
@@ -138,6 +143,7 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		params,
 		exposes,
+		init,
 		bind(values, caller, place = placeAtHost, self = absolute) {
 			const problems: string[] = [];
 			const handles: BoundHandle[] = [];
@@ -312,6 +318,7 @@ function readMetadata(file: string): {
 	description: string | undefined;
 	params: { [name: string]: Type };
 	exposes: string[] | undefined;
+	init: string | undefined;
 } {
 	try {
 		let json: unknown;
@@ -321,12 +328,14 @@ function readMetadata(file: string): {
 			throw new TypeError(`is not JSON: ${messageOf(error)}`);
 		}
 		if (!isObject(json)) throw new TypeError("must be an object");
-		const { description, params = {}, exposes, ...rest } = json;
+		const { description, params = {}, exposes, init, ...rest } = json;
 		refuseKeys(rest, "tau.json");
 		if (description !== undefined && typeof description !== "string")
 			throw new TypeError("`description` must be a string");
 		if (!isObject(params)) throw new TypeError("`params` must be an object, from each parameter's name to its type");
 		if (exposes !== undefined && !Array.isArray(exposes)) throw new TypeError("`exposes` must be an array");
+		if (init !== undefined && (typeof init !== "string" || init.trim() === ""))
+			throw new TypeError("`init` must be a command, a string that is not blank");
 
 		const declared: { [name: string]: Type } = {};
 		for (const [name, type] of Object.entries(params)) {
@@ -345,7 +354,7 @@ function readMetadata(file: string): {
 			exposed.add(specifier);
 		}
 
-		return { description, params: declared, exposes: exposes === undefined ? undefined : [...exposed] };
+		return { description, params: declared, exposes: exposes === undefined ? undefined : [...exposed], init };
 	} catch (error) {
 		throw new Error(`${file}: ${messageOf(error)}`);
 	}

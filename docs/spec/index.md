@@ -18,7 +18,7 @@ parts and from which they would be built into this one, is a work in progress.
 
 - The tau:
   - [Directory](directory.md): its layout, and the symlinks it may hold.
-  - [Metadata](metadata.md): `tau.json`, its parameters, and what its programs import.
+  - [Metadata](metadata.md): `tau.json`, its parameters, what its programs import, and its init.
   - [Prompt](prompt.md): `PROMPT.md`, and what a runtime expands in it.
   - [APIs](apis.md): `api/`, what the agent's programs call.
   - [Packages](packages.md): `node_modules/`, code of the tau's own, built on its APIs.
@@ -26,6 +26,7 @@ parts and from which they would be built into this one, is a work in progress.
   - [Values](values.md): what a run takes: texts, handles, lists and records.
   - [Implementations](implementations.md): how a runtime links each API to its implementation.
   - [Running](running.md): the agent's view, and what else it reaches.
+  - [Init](init.md): a command run before the agent, which may do the run without it.
   - [Results](results.md): what a run gives back, and when it fails.
   - [Paths](paths.md): what a runtime promises of the caller's paths.
   - [Runtimes](runtimes.md): how the agent runs programs, and what a runtime presents to the model.

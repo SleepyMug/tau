@@ -171,10 +171,14 @@ test("an open record takes any values, each handle with the mode it carries", ()
 
 test("a tau without tau.json takes no parameters", () => {
 	const tau = loadTau(write("plain", { "PROMPT.md": "Say hi. Costs $1, and $${x} stays as it is." }));
-	assert.deepEqual([tau.description, tau.params, tau.exposes], [undefined, {}, undefined]);
+	assert.deepEqual([tau.description, tau.params, tau.exposes, tau.init], [undefined, {}, undefined, undefined]);
 	assert.deepEqual(tau.bind({}, caller), { prompt: "Say hi. Costs $1, and ${x} stays as it is.", values: {}, handles: [] });
 	assert.throws(() => tau.bind({ x: "1" }, caller), /no parameter is named x/);
 	assert.throws(() => loadTau(tmp), /not a tau \(no PROMPT\.md\)/);
+});
+
+test("a tau's init is the command tau.json gives, as it gives it", () => {
+	assert.equal(tauOf("init", { init: "node init.ts" }).init, "node init.ts");
 });
 
 test("tau.json outside the spec is refused, naming the file and the reason", () => {
@@ -208,6 +212,8 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 		["exposes", { exposes: "notes-kit" }, /`exposes` must be an array/],
 		["exposesname", { exposes: ["notes-kit/sub"] }, /`exposes`: "notes-kit\/sub" is not a package's name/],
 		["exposestwice", { exposes: ["@api/notes", "@api/notes"] }, /`exposes` lists @api\/notes twice/],
+		["init", { init: ["node", "init.ts"] }, /`init` must be a command, a string that is not blank/],
+		["initblank", { init: " " }, /`init` must be a command/],
 	];
 	for (const [name, json, reason] of refused) {
 		const files = { "PROMPT.md": "hi", "tau.json": typeof json === "string" ? json : JSON.stringify(json) };
