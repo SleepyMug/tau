@@ -1,6 +1,7 @@
 # The tau API
 
-The **tau API** lets the agent's programs read the run's values, and run other taus. A tau that
+The **tau API** lets the agent's programs read the run's values, and run other taus, and names the
+exit codes of the tau's init (see [Init](init.md)). A tau that
 uses it declares it as any API, in `api/tau/index.d.ts` (see [APIs](apis.md)), as below or less of
 it, and a runtime that implements it gives its implementation (see
 [Implementations](implementations.md)):
@@ -42,6 +43,15 @@ export declare function run(
 	values: { readonly [name: string]: Value },
 	signal?: AbortSignal,
 ): Promise<Result>;
+
+/** Init's exit code when it did the run: the agent does not run, and init's stdout is its text. */
+export declare const TAU_SKIP: 0;
+
+/** Init's exit code when the agent is to run on the prompt, as it would without init. */
+export declare const TAU_RUN: 100;
+
+/** Init's exit code when it failed: the agent runs, told so, as with any other ending. */
+export declare const TAU_FALLBACK: 101;
 ```
 
 The agent that calls `run` is the new run's caller: the paths it gives are in its view, and the

@@ -60,6 +60,21 @@ day, to ${itinerary}. Then have the tau at ${self}/taus/city-guide write a guide
 the same wishes, into ${trip}.
 ```
 
+`init.mts`:
+
+```ts
+import { writeFileSync } from "node:fs";
+import { TAU_RUN, values } from "@api/tau";
+import { planDays, readBookings } from "trip-search";
+
+const { trip, itinerary } = values() as { trip: { $inout: string }; itinerary: { $out: string } };
+const bookings = readBookings(trip.$inout);
+if (bookings.length === 0) process.exit(TAU_RUN); // nothing booked yet: the agent plans the trip
+writeFileSync(itinerary.$out, planDays(bookings));
+// Ending normally exits 0, TAU_SKIP: the agent does not run, and this is the run's final text.
+console.log(`The trip was booked already; wrote its itinerary, from ${bookings.length} bookings.`);
+```
+
 A call gives a value for each parameter, as JSON:
 
 ```json
@@ -90,13 +105,14 @@ A call gives a value for each parameter, as JSON:
   JavaScript or as TypeScript Node.js runs as is, and they import what `exposes` lists, by default
   every API, resolving from the tau's directory, as its own code does.
 - The **tau API**, `@api/tau`, gives programs `values()`, the run's values, each handle as its path
-  where the agent sees it, and `run(tau, values)`, which runs another tau and resolves to how it
-  ended.
+  where the agent sees it; `run(tau, values)`, which runs another tau and resolves to how it ended;
+  and `TAU_SKIP`, `TAU_RUN` and `TAU_FALLBACK`, init's exit codes.
 - Each directory `skills/<name>/` with a `SKILL.md` is a skill the agent can use.
 - `init`, optional in `tau.json`, here `node init.mts`, is a command the runtime runs in the tau's
-  directory before the agent, as a program the agent runs: exiting 0, it did the run, its stdout
-  the final text, and the agent does not run; 100, the agent runs as it would without it; 101, or
-  any other ending, it failed, and the agent runs, told so, with what it wrote.
+  directory before the agent, as a program the agent runs: exiting 0, `TAU_SKIP`, it did the run,
+  its stdout the final text, and the agent does not run; 100, `TAU_RUN`, the agent runs as it would
+  without it; 101, `TAU_FALLBACK`, or any other ending, such as a throw, it failed, and the agent
+  runs, told so, with what it wrote.
 
 ## Semantics
 

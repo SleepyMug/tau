@@ -1,7 +1,7 @@
 # Metadata
 
-`tau.json` declares what a tau takes from its caller, what its programs import, and its init. Without it, a
-tau takes no parameters, and its programs import every API.
+`tau.json` declares what a tau takes from its caller, what its programs import, and its init.
+Without it, a tau takes no parameters, and its programs import every API.
 
 ```json
 {

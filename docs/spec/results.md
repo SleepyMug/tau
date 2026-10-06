@@ -1,13 +1,13 @@
 # Results
 
 A run succeeds when the agent **returns normally**, running to its end without being stopped or
-failing, or, without the agent, when the tau's init skips it (see [Init](init.md)), and leaves at the place of each `$out` and `$inout` handle what [Paths](paths.md) asks.
-By the time the caller learns that the run succeeded, the path of each holds what the agent left
-there: as the agent left it, at a place that is the caller's own, or else put there from a copy:
-a directory merges into a directory already there, each of its entries put the same way, and
-anything else replaces what is there. What a run that fails leaves at those paths is not specified
-(see [Values](values.md)): a caller that needs all or nothing gives fresh `$out` paths, and moves
-them once the run succeeds.
+failing, or, without the agent, when the tau's init skips it (see [Init](init.md)), and leaves at
+the place of each `$out` and `$inout` handle what [Paths](paths.md) asks. By the time the caller
+learns that the run succeeded, the path of each holds what the agent left there: as the agent left
+it, at a place that is the caller's own, or else put there from a copy: a directory merges into a
+directory already there, each of its entries put the same way, and anything else replaces what is
+there. What a run that fails leaves at those paths is not specified (see [Values](values.md)): a
+caller that needs all or nothing gives fresh `$out` paths, and moves them once the run succeeds.
 
 Either way, the caller gets whether the run succeeded, why if it failed, and the agent's final
 text. Nothing else comes out of a run: a runtime builds no structure from what the agent does.

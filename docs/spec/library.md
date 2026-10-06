@@ -21,8 +21,8 @@ checkOutputs(run, locate);                                   // 6. check what th
 1. **Read the tau.** `loadTau(dir)` reads `PROMPT.md` and `tau.json` (see [Metadata](metadata.md)
    and [Prompt](prompt.md)), and checks the symlinks of what a runtime reads (see
    [Directory](directory.md)). The tau it gives has its `description`, `params`, each a `Type`,
-   `exposes`, and `init`, as `tau.json` declares them, for usage, or to offer the tau to another agent as a
-   tool.
+   `exposes`, and `init`, as `tau.json` declares them, for usage, or to offer the tau to another
+   agent as a tool.
 2. **Bind the values.** `tau.bind(values, caller, place, self)` checks `values` against the
    parameters' types (see [Values](values.md)), and computes, without doing it, what the run
    needs: the `handles`, each with where it lies in the values (`at`, such as `edits[0]` or
@@ -48,12 +48,12 @@ checkOutputs(run, locate);                                   // 6. check what th
    presents what the tau exposes, and its skills, to the model (see [Runtimes](runtimes.md)); and
    shows the agent its values; runs the tau's init, if it has one (see [Init](init.md)); and runs
    the agent on the prompt, unless init skipped it.
-6. **Check what the agent left.** Once the agent returns normally, or init skipped it, `checkOutputs(run, locate)`
-   checks what [Paths](paths.md) asks when the run ends, where `locate` finds what the agent left
-   at each `$out` and `$inout` handle's place: by default its `view`, which suits a runtime whose
-   agent works on its own machine; one whose agent works elsewhere, such as in a container, checks
-   where it can. A runtime that gave copies then puts them at the caller's paths (see
-   [Results](results.md)).
+6. **Check what the agent left.** Once the agent returns normally, or init skipped it,
+   `checkOutputs(run, locate)` checks what [Paths](paths.md) asks when the run ends, where `locate`
+   finds what the agent left at each `$out` and `$inout` handle's place: by default its `view`,
+   which suits a runtime whose agent works on its own machine; one whose agent works elsewhere, such
+   as in a container, checks where it can. A runtime that gave copies then puts them at the caller's
+   paths (see [Results](results.md)).
 
 ## Calls and results
 
