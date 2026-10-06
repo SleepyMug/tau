@@ -46,8 +46,8 @@ export interface Tau {
 	 */
 	readonly exposes: readonly string[] | undefined;
 	/**
-	 * The command a runtime runs, with `sh -c` in the tau's own directory, before the agent, which
-	 * may do the run without it (docs/spec/init.md); undefined without one.
+	 * The command a runtime runs, with `sh -c`, before the agent, which may do the run without it
+	 * (docs/spec/init.md), as tau.json gives it; undefined without one. `bind` expands it.
 	 */
 	readonly init: string | undefined;
 	/**
@@ -101,6 +101,8 @@ export interface Run {
 	readonly values: { readonly [name: string]: Value };
 	/** Every handle in the values, in their order. */
 	readonly handles: readonly BoundHandle[];
+	/** The tau's init, `${self}` replaced by `self`, quoted as one word for `sh`; undefined without one. */
+	readonly init: string | undefined;
 }
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
@@ -110,7 +112,7 @@ const PACKAGE = /^(?:@[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*
 const SELF = "self";
 const TYPES: readonly string[] = ["text", "file", "dir", "path", "list", "record"] satisfies Type["type"][];
 const MODES: readonly Mode[] = ["in", "out", "inout"];
-/** `$${` is a literal `${`; any other `${` must be `${self}` or name a text or a handle. */
+/** `$${` is a literal `${`; any other `${` must be `${self}`, or, in the prompt, name a text or a handle. */
 const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
 
 /**
@@ -130,9 +132,15 @@ export function loadTau(dir: string): Tau {
 	const prompt = readFileSync(promptFile, "utf8");
 	let template: Template;
 	try {
-		template = parsePrompt(prompt, params);
+		template = parseTemplate(prompt, (inside) => placeholderProblem(inside, params), (line) => `line ${line}`);
 	} catch (error) {
 		throw new Error(`${promptFile}: ${messageOf(error)}`);
+	}
+	let command: Template | undefined;
+	try {
+		command = init === undefined ? undefined : parseTemplate(init, initProblem, () => "`init`");
+	} catch (error) {
+		throw new Error(`${metadataFile}: ${messageOf(error)}`);
 	}
 	const problems = linkProblems(absolute, exposes?.some((specifier) => !specifier.startsWith(API_SCOPE)) ?? false);
 	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
@@ -196,7 +204,12 @@ export function loadTau(dir: string): Tau {
 				: (problems.push("the values must be a record, from each parameter's name to its value"), undefined);
 			if (problems.length > 0 || bound === undefined)
 				throw new TypeError(`the values do not fit the tau:\n  ${problems.join("\n  ")}`);
-			return { prompt: expand(template, bound, self), values: bound, handles };
+			return {
+				prompt: expand(template, bound, self),
+				values: bound,
+				handles,
+				init: command === undefined ? undefined : expand(command, {}, shellWord(self)),
+			};
 		},
 	};
 }
@@ -402,13 +415,21 @@ function readType(value: unknown, at: string, parameter: boolean): Type {
 	}
 }
 
-/** A prompt as text around placeholders: `text` has one more entry than `names`, each a path of names. */
+/** A prompt, or an init, as text around placeholders: `text` has one more entry than `names`, each a path of names. */
 interface Template {
 	readonly text: readonly string[];
 	readonly names: readonly (readonly string[])[];
 }
 
-function parsePrompt(prompt: string, params: { readonly [name: string]: Type }): Template {
+/**
+ * `prompt` as a template, each placeholder checked by `problemOf`, and named in what it throws as
+ * `where` says from its line.
+ */
+function parseTemplate(
+	prompt: string,
+	problemOf: (inside: string) => string | undefined,
+	where: (line: number) => string,
+): Template {
 	const text: string[] = [];
 	const names: string[][] = [];
 	let chunk = "";
@@ -421,10 +442,10 @@ function parsePrompt(prompt: string, params: { readonly [name: string]: Type }):
 			continue;
 		}
 		const [placeholder, inside = "", closed] = match;
-		const line = prompt.slice(0, match.index).split("\n").length;
-		if (closed === "") throw new TypeError(`line ${line}: ${placeholder} is not closed; write $\${ for a literal \${`);
-		const problem = placeholderProblem(inside, params);
-		if (problem !== undefined) throw new TypeError(`line ${line}: ${placeholder} ${problem}`);
+		const at = where(prompt.slice(0, match.index).split("\n").length);
+		if (closed === "") throw new TypeError(`${at}: ${placeholder} is not closed; write $\${ for a literal \${`);
+		const problem = problemOf(inside);
+		if (problem !== undefined) throw new TypeError(`${at}: ${placeholder} ${problem}`);
 		text.push(chunk);
 		names.push(inside.split("."));
 		chunk = "";
@@ -455,6 +476,17 @@ function placeholderProblem(inside: string, params: { readonly [name: string]: T
 	if (type.type === "record")
 		return `names ${describe(type)}, which the prompt cannot hold: name a text, a handle, or a list of them, or read it in a program, through the tau API`;
 	return undefined;
+}
+
+/** Why `${inside}` cannot be in an init, if it cannot: it names anything but `self`. */
+function initProblem(inside: string): string | undefined {
+	if (inside === SELF) return undefined;
+	return `is not \${${SELF}}, the one name init holds: its programs read the values through the tau API; write $\${ for a literal \${`;
+}
+
+/** A path as one word for `sh`: as it is when nothing in it is special, else in single quotes. */
+function shellWord(text: string): string {
+	return /^[A-Za-z0-9_@%+=:,./-]+$/u.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`;
 }
 
 function expand(template: Template, values: { readonly [name: string]: Value }, self: string): string {

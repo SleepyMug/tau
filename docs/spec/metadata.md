@@ -37,7 +37,8 @@ Each key is optional, and any other is refused:
   [APIs](apis.md)), or a package of the tau's own, by its name (see [Packages](packages.md)).
   Without it, they import every API.
 - **`init`** is a command, a string that is not blank, that a runtime runs before the agent, and
-  which may do the run without it (see [Init](init.md)).
+  which may do the run without it; it names the tau's own directory as `${self}`, and nothing else
+  (see [Init](init.md)).
 
 ## Types
 

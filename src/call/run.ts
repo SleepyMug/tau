@@ -158,7 +158,7 @@ export function packResult(outcome: Result, handles: readonly BoundHandle[], loc
 	let result: Result = outcome.ok ? { ok: true, text: outcome.text } : outcome;
 	if (result.ok) {
 		try {
-			checkOutputs({ prompt: "", values: {}, handles }, locate);
+			checkOutputs({ prompt: "", values: {}, handles, init: undefined }, locate);
 		} catch (error) {
 			result = { ok: false, text: result.text, failure: error instanceof Error ? error.message : String(error) };
 		}

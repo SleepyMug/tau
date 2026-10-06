@@ -172,13 +172,22 @@ test("an open record takes any values, each handle with the mode it carries", ()
 test("a tau without tau.json takes no parameters", () => {
 	const tau = loadTau(write("plain", { "PROMPT.md": "Say hi. Costs $1, and $${x} stays as it is." }));
 	assert.deepEqual([tau.description, tau.params, tau.exposes, tau.init], [undefined, {}, undefined, undefined]);
-	assert.deepEqual(tau.bind({}, caller), { prompt: "Say hi. Costs $1, and ${x} stays as it is.", values: {}, handles: [] });
+	assert.deepEqual(tau.bind({}, caller), { prompt: "Say hi. Costs $1, and ${x} stays as it is.", values: {}, handles: [], init: undefined });
 	assert.throws(() => tau.bind({ x: "1" }, caller), /no parameter is named x/);
 	assert.throws(() => loadTau(tmp), /not a tau \(no PROMPT\.md\)/);
 });
 
-test("a tau's init is the command tau.json gives, as it gives it", () => {
-	assert.equal(tauOf("init", { init: "node init.ts" }).init, "node init.ts");
+test("a tau's init is the command tau.json gives, which a run expands with ${self}, as one word for sh", () => {
+	const tau = tauOf("init", { init: "node ${self}/init.mts $${HOME}" });
+	assert.equal(tau.init, "node ${self}/init.mts $${HOME}");
+	assert.equal(tau.bind({}, caller).init, `node ${tau.dir}/init.mts \${HOME}`);
+	assert.equal(tau.bind({}, caller, undefined, "/tau/self").init, "node /tau/self/init.mts ${HOME}");
+	assert.equal(tau.bind({}, caller, undefined, "/my taus/it's").init, `node '/my taus/it'\\''s'/init.mts \${HOME}`);
+	assert.equal(tauOf("noinit", {}).bind({}, caller).init, undefined);
+	// It names nothing else: a program reads the values through the tau API.
+	const refused = (init: string) => () => tauOf("initnames", { params: { term: { type: "text", description: "A term." } }, init });
+	assert.throws(refused("node ${self}/init.mts ${term}"), /tau\.json: `init`: \$\{term\} is not \$\{self\}, the one name init holds/);
+	assert.throws(refused("node ${self"), /tau\.json: `init`: \$\{self is not closed/);
 });
 
 test("tau.json outside the spec is refused, naming the file and the reason", () => {

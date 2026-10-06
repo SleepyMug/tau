@@ -5,16 +5,19 @@ A tau may have an **init**: a command, which `tau.json` gives as `init` (see
 it, such as when a program can do the task alone, for some values.
 
 ```json
-{ "init": "node init.mts" }
+{ "init": "node ${self}/init.mts" }
 ```
 
-A runtime runs it once for each run, with `sh -c`, in the tau's own directory, as `${self}` names
-it, with the handles in place, and the APIs linked: its imports resolve as the agent's programs'
-do (see [Runtimes](runtimes.md)), and it reads the run's values through the tau API (see
-[The tau API](tau-api.md)), each handle's path where the agent sees it. Like the agent, it reads
-the tau's directory, but does not change it. What it does is the run's, as what the agent does is:
-what it leaves at the handles' places, which the agent finds there, and its API calls, which stay
-done, the runs of other taus included.
+A runtime runs it once for each run, with `sh -c`, in the agent's working directory, with the
+handles in place, and the APIs linked. In it, `${self}` becomes the tau's own directory, where
+the agent sees it, as one word for `sh`, quoted if need be, and `$${` a literal `${`. It names
+nothing else: it reads the run's values through the tau API (see [The tau API](tau-api.md)), each
+handle's path where the agent sees it. A program of the tau's, such as `${self}/init.mts`,
+imports what the agent's programs do, resolving as the tau's own code does (see
+[Runtimes](runtimes.md)). Like the agent, init reads the tau's directory but does not change it,
+and what it writes but at the handles' places is scratch (see [Results](results.md)). What it does
+is the run's, as what the agent does is: what it leaves at the handles' places, which the agent
+finds there, and its API calls, which stay done, the runs of other taus included.
 
 How it exits says what comes next, each code named in the tau API:
 - **0, `TAU_SKIP`**: the agent does not run. The run succeeds as if the agent returned normally,

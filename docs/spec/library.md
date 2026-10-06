@@ -29,10 +29,11 @@ checkOutputs(run, locate);                                   // 6. check what th
    `args.src`, and `pointer`, a JSON Pointer, such as `/edits/0`), its `mode`, its `kind` (`file`,
    `dir`, or `path` where no type declares one), the caller's path (`host`), resolved against
    `caller.cwd`, its base name (`name`), and where the agent sees it (`view`);
-   the `values`, each handle's path its view, to give the agent; and the `prompt`, expanded.
-   `place` gives each handle its view, asked in the order of the values; without it, the view is
-   the caller's path itself, for a runtime that does not copy. `${self}` becomes `self`, where the
-   agent sees the tau's own directory; without it, where the tau is.
+   the `values`, each handle's path its view, to give the agent; the `prompt`, expanded; and the
+   `init`, if the tau has one, expanded (see [Init](init.md)). `place` gives each handle its view,
+   asked in the order of the values; without it, the view is the caller's path itself, for a
+   runtime that does not copy. `${self}` becomes `self`, where the agent sees the tau's own
+   directory; without it, where the tau is.
 3. **Check the handles.** `checkInputs(run)` checks what [Paths](paths.md) asks when the run
    starts.
 4. **Load the APIs.** `loadApis(dir)` checks the APIs as [APIs](apis.md) has them, and gives each

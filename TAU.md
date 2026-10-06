@@ -46,7 +46,7 @@ plan-trip/
     "itinerary": { "type": "file", "mode": "out", "description": "The plan, day by day." }
   },
   "exposes": ["trip-search", "@api/tau"],
-  "init": "node init.mts"
+  "init": "node ${self}/init.mts"
 }
 ```
 
@@ -108,11 +108,11 @@ A call gives a value for each parameter, as JSON:
   where the agent sees it; `run(tau, values)`, which runs another tau and resolves to how it ended;
   and `TAU_SKIP`, `TAU_RUN` and `TAU_FALLBACK`, init's exit codes.
 - Each directory `skills/<name>/` with a `SKILL.md` is a skill the agent can use.
-- `init`, optional in `tau.json`, here `node init.mts`, is a command the runtime runs in the tau's
-  directory before the agent, as a program the agent runs: exiting 0, `TAU_SKIP`, it did the run,
-  its stdout the final text, and the agent does not run; 100, `TAU_RUN`, the agent runs as it would
-  without it; 101, `TAU_FALLBACK`, or any other ending, such as a throw, it failed, and the agent
-  runs, told so, with what it wrote.
+- `init`, optional in `tau.json`, here `node ${self}/init.mts`, is a command the runtime runs
+  before the agent, in the agent's working directory, `${self}`, the tau's directory, its one
+  placeholder: exiting 0, `TAU_SKIP`, it did the run, its stdout the final text, and the agent
+  does not run; 100, `TAU_RUN`, the agent runs as it would without it; 101, `TAU_FALLBACK`, or any
+  other ending, such as a throw, it failed, and the agent runs, told so, with what it wrote.
 
 ## Semantics
 
