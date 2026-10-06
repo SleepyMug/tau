@@ -8,7 +8,8 @@ programs call, declared in TypeScript.
 ```
 plan-trip/
 ├── PROMPT.md                   the prompt, the only file required
-├── tau.json                    what it takes, and what its programs import
+├── tau.json                    what it takes, what its programs import, and its init
+├── init.mts                    run first: writes the itinerary itself if the trip is booked
 ├── skills/visas/SKILL.md       a skill the agent can use
 ├── api/travel/index.d.ts       an API, which programs import as @api/travel
 ├── api/tau/index.d.ts          the tau API
@@ -44,7 +45,8 @@ plan-trip/
     "trip": { "type": "dir", "mode": "inout", "description": "The trip's bookings." },
     "itinerary": { "type": "file", "mode": "out", "description": "The plan, day by day." }
   },
-  "exposes": ["trip-search", "@api/tau"]
+  "exposes": ["trip-search", "@api/tau"],
+  "init": "node init.mts"
 }
 ```
 
@@ -91,10 +93,10 @@ A call gives a value for each parameter, as JSON:
   where the agent sees it, and `run(tau, values)`, which runs another tau and resolves to how it
   ended.
 - Each directory `skills/<name>/` with a `SKILL.md` is a skill the agent can use.
-- `init`, optional in `tau.json`, is a command the runtime runs in the tau's directory before the
-  agent, as a program the agent runs: exiting 0, it did the run, its stdout the final text, and the
-  agent does not run; 100, the agent runs as it would without it; 101, or any other ending, it
-  failed, and the agent runs, told so, with what it wrote.
+- `init`, optional in `tau.json`, here `node init.mts`, is a command the runtime runs in the tau's
+  directory before the agent, as a program the agent runs: exiting 0, it did the run, its stdout
+  the final text, and the agent does not run; 100, the agent runs as it would without it; 101, or
+  any other ending, it failed, and the agent runs, told so, with what it wrote.
 
 ## Semantics
 
