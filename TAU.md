@@ -84,8 +84,9 @@ A call gives a value for each parameter, as JSON:
   literal `${`. The rest, such as `travelers`, the agent's programs read through the tau API.
 - An API is declared in `api/<name>/` as TypeScript, whose doc comments say what it does, and the
   runtime implements it, so the tau holds neither its code nor credentials. `node_modules/` holds
-  packages built on the APIs. The agent's programs, in TypeScript for Node.js 24 or later, import
-  what `exposes` lists, by default every API.
+  packages built on the APIs. The agent runs its programs with `node`, Node.js 24 or later, as
+  JavaScript or as TypeScript Node.js runs as is, and wherever one is, it imports what `exposes`
+  lists, by default every API.
 - The **tau API**, `@api/tau`, gives programs `values()`, the run's values, each handle as its path
   where the agent sees it, and `run(tau, values)`, which runs another tau and resolves to how it
   ended.

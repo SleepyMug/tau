@@ -15,9 +15,11 @@ the API exports, the implementation exports too, with a type that fits.
   has it, with its imports resolving as they do there, whatever else the implementation declares.
 - **Every import gets the same implementation.** Wherever an agent's program or a package of the
   tau imports `@api/<name>`, it gets the runtime's implementation, one module for all of them in a
-  process. A runtime can give it with a `node_modules/` of its own in a directory above the tau's,
-  holding a package `@api/<name>` for each API, since Node.js looks for a package in every
-  directory above the file that imports it, as TypeScript does for an API that imports another.
+  process. A runtime can give it with a `node_modules/` of its own in a directory above the tau's
+  and the agent's programs, holding a package `@api/<name>` for each API, since Node.js looks for a
+  package in every directory above the file that imports it, as TypeScript does for an API that
+  imports another; or with a hook that resolves `@api/<name>`, such as Node.js's
+  `module.registerHooks`.
 - **How an implementation runs is the runtime's business**, which a tau cannot tell, and does not
   depend on. It may run in the program's process, or be split in two: a part there, which calls,
   over a socket or any other channel, a part that holds credentials or reaches beyond the agent's

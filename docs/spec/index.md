@@ -28,7 +28,7 @@ parts and from which they would be built into this one, is a work in progress.
   - [Running](running.md): the agent's view, and what else it reaches.
   - [Results](results.md): what a run gives back, and when it fails.
   - [Paths](paths.md): what a runtime promises of the caller's paths.
-  - [Runtimes](runtimes.md): what each runtime presents to the model.
+  - [Runtimes](runtimes.md): how the agent runs programs, and what a runtime presents to the model.
   - [The tau API](tau-api.md): how the agent's programs read the run's values, and run other taus.
   - [Serialization](serialization.md): a run's call and result as archives, to send elsewhere.
 - [Library](library.md): `@sleepymug/tau`, which reads and checks a tau for runtimes, and packs a
