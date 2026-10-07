@@ -3,7 +3,7 @@ import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { type BoundFile, loadTau } from "../tau/tau.js";
+import { loadTau } from "../tau/tau.js";
 import { type Output, readCall, readResult, writeResult } from "./archive.js";
 import { applyResult, checkResult, type Finished, type PackedCall, packCall, packResult, placeCall, type Runtime, runTau } from "./run.js";
 
@@ -56,23 +56,29 @@ const CALL = {
 	args: { tone: "dry, as ${rules} says," },
 };
 
-/** Where a runtime that copies places each file: `<work>/<mode>/<base>`. */
-const placer = (work: string) => ({ mode, base }: { mode: string; base: string }) => path.join(work, mode, base);
+/** Where the agent sees each file, by name. */
+type Places = { readonly [name: string]: string };
 
-/** The runtime's side of a run, here: read the call, place it, let `agent` work, and pack how it ended. */
-async function runtimeSide(call: Uint8Array, work: string, agent: (files: readonly BoundFile[]) => void, outcome = { ok: true, text: "Done." }) {
+/**
+ * The runtime's side of a run, here: read the call, check it, place each file at
+ * `<work>/<mode>/<base>`, let `agent` work, and pack how it ended.
+ */
+async function runtimeSide(call: Uint8Array, work: string, agent: (places: Places) => void, outcome = { ok: true, text: "Done." }) {
 	const self = path.join(work, "self");
 	await placeCall(await readCall(once(call)), { tau: self });
 	const { json, contents } = await readCall(once(call));
-	const run = loadTau(self).bind({ files: json.files, args: json.args }, { cwd: "/" }, placer(work), self);
-	await placeCall({ json, contents }, { files: run.files });
-	agent(run.files);
-	return { run, result: await bytesOf(packResult(outcome, run.files)) };
+	const tau = loadTau(self);
+	const checked = tau.check(json);
+	const places = Object.fromEntries(Object.entries(checked.files).map(([name, { mode, base }]) => [name, path.join(work, mode, base)]));
+	const expanded = tau.expand(checked, places, self);
+	await placeCall({ json, contents }, { places });
+	agent(places);
+	return { run: { ...checked, ...expanded }, result: await bytesOf(packResult(outcome, checked, places)) };
 }
 
 /** What an agent does with CALL: edits the site, writes the report and a page. */
-function edit(files: readonly BoundFile[]): void {
-	const view = (name: string) => (files.find((file) => file.name === name) as BoundFile).view;
+function edit(places: Places): void {
+	const view = (name: string) => places[name] as string;
 	writeFileSync(path.join(view("site"), "index.md"), "new\n");
 	mkdirSync(path.join(view("site"), "new"));
 	writeFileSync(path.join(view("site"), "new", "page.md"), "page\n");
@@ -83,7 +89,7 @@ function edit(files: readonly BoundFile[]): void {
 
 test("a run travels as a call and a result: packed from the caller's paths, placed where the agent works, and put back at them", async () => {
 	const caller = home("home1");
-	const packed = packCall(TAU, CALL, { cwd: caller });
+	const packed = packCall(TAU, CALL, caller);
 	assert.equal(packed.tauDir, TAU);
 	assert.deepEqual(packed.targets, {
 		site: path.join(caller, "site"),
@@ -97,8 +103,8 @@ test("a run travels as a call and a result: packed from the caller's paths, plac
 		files: {
 			site: { mode: "inout", base: "site", kind: "dir" },
 			rules: { mode: "in", base: "style.md", kind: "file" },
-			report: { mode: "out", base: "report.md" },
-			pages: { mode: "out", base: "pages" },
+			report: { mode: "out", kind: "file", base: "report.md" },
+			pages: { mode: "out", kind: "dir", base: "pages" },
 			extras: { mode: "in", base: "extras", kind: "dir" },
 		},
 		args: { tone: "dry, as ${rules} says," },
@@ -117,7 +123,7 @@ test("a run travels as a call and a result: packed from the caller's paths, plac
 	assert.equal(readFileSync(path.join(work, "in", "extras", "kept.md"), "utf8"), "kept\n");
 	const read = await readResult(once(result));
 	assert.deepEqual(read.json, { ok: true, text: "Done.", outputs: { site: { kind: "dir" }, report: { kind: "file" }, pages: { kind: "dir" } } });
-	checkResult(read.json, run.files);
+	checkResult(read.json, run);
 
 	assert.deepEqual(await applyResult(once(result), packed.targets), { ok: true, text: "Done." });
 	assert.deepEqual(readdirSync(path.join(caller, "site")).sort(), ["index.md", "kept.md", "new"]);
@@ -133,19 +139,19 @@ test("extra files travel as declared ones do, with the modes the call gives them
 		files: { ...CALL.files, notes: { mode: "in", path: "site/kept.md" }, log: { mode: "out", kind: "file", path: "out/log.md" } },
 		args: { tone: "dry", call: { files: { notes: "${notes}" }, args: { start: "$${notes}" } } },
 	};
-	const packed = packCall(TAU, call, { cwd: caller });
+	const packed = packCall(TAU, call, caller);
 	assert.equal(packed.targets.log, path.join(caller, "out/log.md"));
 	const archive = await bytesOf(packed.archive);
 	const { json } = await readCall(once(archive));
 	assert.deepEqual(Object.entries(json.files).slice(5), [
 		["notes", { mode: "in", base: "kept.md", kind: "file" }],
-		["log", { mode: "out", base: "log.md" }],
+		["log", { mode: "out", kind: "file", base: "log.md" }],
 	]);
 
 	const work = path.join(tmp, "work-extras");
-	const { run, result } = await runtimeSide(archive, work, (files) => {
-		edit(files);
-		const view = (name: string) => (files.find((file) => file.name === name) as BoundFile).view;
+	const { run, result } = await runtimeSide(archive, work, (places) => {
+		edit(places);
+		const view = (name: string) => places[name] as string;
 		writeFileSync(view("log"), `read ${readFileSync(view("notes"), "utf8")}`);
 	});
 	assert.deepEqual(run.args.call, { files: { notes: `${work}/in/kept.md` }, args: { start: "${notes}" } });
@@ -153,13 +159,13 @@ test("extra files travel as declared ones do, with the modes the call gives them
 	assert.equal(readFileSync(path.join(caller, "out", "log.md"), "utf8"), "read kept\n");
 });
 
-test("a run whose agent did not leave what the tau declares fails, and gives back nothing", async () => {
+test("a run whose agent did not leave what the call asks fails, and gives back nothing", async () => {
 	const caller = home("home2");
-	const packed = packCall(TAU, CALL, { cwd: caller });
+	const packed = packCall(TAU, CALL, caller);
 	const { result } = await runtimeSide(await bytesOf(packed.archive), path.join(tmp, "work2"), () => {});
 	const { json } = await readResult(once(result));
 	assert.equal(json.ok, false);
-	assert.match(json.failure ?? "", /^the run did not leave what the tau declares:\n {2}report: \S+\/out\/report\.md does not exist\n {2}pages: /u);
+	assert.match(json.failure ?? "", /^the run did not leave what the call asks:\n {2}report: \S+\/out\/report\.md does not exist\n {2}pages: /u);
 	assert.deepEqual(json.outputs, {});
 	assert.deepEqual(await applyResult(once(result), packed.targets), { ok: false, text: "Done.", failure: json.failure });
 	assert.deepEqual(readdirSync(path.join(caller, "out")), []);
@@ -169,9 +175,9 @@ test("a run whose agent did not leave what the tau declares fails, and gives bac
 test("the caller's paths are checked when the call is packed, as a runtime would", () => {
 	const caller = home("home3");
 	const files = (rules: unknown) => ({ ...CALL, files: { ...CALL.files, rules } });
-	assert.throws(() => packCall(TAU, files("missing.md"), { cwd: caller }), /^Error: the files do not fit the tau:\n {2}rules: \S+\/missing\.md does not exist$/u);
-	assert.throws(() => packCall(TAU, files({ $in: "style.md" }), { cwd: caller }), /rules: \{"\$in":"style\.md"\} is neither a path, a list of paths, a file with its mode, \{mode, path, kind\}, nor an archive's file/u);
-	assert.throws(() => packCall(TAU, { files: CALL.files }, { cwd: caller }), /args: must have required property 'tone'/u);
+	assert.throws(() => packCall(TAU, files("missing.md"), caller), /^Error: the files do not fit the tau:\n {2}rules: \S+\/missing\.md does not exist$/u);
+	assert.throws(() => packCall(TAU, files({ $in: "style.md" }), caller), /rules: \{"\$in":"style\.md"\} is neither a path, a list of paths, nor a file with its mode, \{mode, path, kind\}$/mu);
+	assert.throws(() => packCall(TAU, { files: CALL.files }, caller), /args: must have required property 'tone'/u);
 });
 
 /** A result of `outputs`, each from a directory or file of `staged`, by its name. */
@@ -213,12 +219,14 @@ test("the caller's own path leads where its symlink does, an inner path is put l
 });
 
 test("a result from a runtime not trusted is checked against the run's files", () => {
-	const files = [
-		{ name: "site", mode: "inout", kind: "dir" },
-		{ name: "rules", mode: "in", kind: "file" },
-		{ name: "report", mode: "out", kind: "file" },
-		{ name: "either", mode: "out" },
-	] as const;
+	const files = {
+		files: {
+			site: { mode: "inout", kind: "dir", base: "site" },
+			rules: { mode: "in", kind: "file", base: "rules.md" },
+			report: { mode: "out", kind: "file", base: "report.md" },
+			either: { mode: "out", base: "either" },
+		},
+	} as const;
 	checkResult({ ok: true, text: "", outputs: { site: { kind: "dir" }, report: { kind: "file" }, either: { kind: "dir" } } }, files);
 	checkResult({ ok: false, text: "", outputs: {} }, files);
 	assert.throws(
@@ -242,7 +250,7 @@ class LocalRuntime implements Runtime {
 	readonly runs = new Map<string, { call: PackedCall; ended: Promise<Finished>; cancelled: boolean }>();
 
 	constructor(
-		private readonly agent: (files: readonly BoundFile[]) => void,
+		private readonly agent: (places: Places) => void,
 		private readonly release: Promise<void> = Promise.resolve(),
 	) {}
 
@@ -270,14 +278,14 @@ class LocalRuntime implements Runtime {
 
 test("runTau runs a tau on a runtime, and waits for it; aborting it cancels the run, which fails", async () => {
 	const caller = home("home6");
-	assert.deepEqual(await runTau(new LocalRuntime(edit), TAU, CALL, { cwd: caller }), { ok: true, text: "Done." });
+	assert.deepEqual(await runTau(new LocalRuntime(edit), TAU, CALL, caller), { ok: true, text: "Done." });
 	assert.equal(readFileSync(path.join(caller, "out", "report.md"), "utf8"), "rules: rules\n");
 
 	const again = home("home7");
 	let release = (): void => {};
 	const runtime = new LocalRuntime(edit, new Promise((resolve) => { release = resolve; }));
 	const controller = new AbortController();
-	const running = runTau(runtime, TAU, CALL, { cwd: again }, controller.signal);
+	const running = runTau(runtime, TAU, CALL, again, controller.signal);
 	while (runtime.runs.size === 0) await new Promise((resolve) => setImmediate(resolve));
 	controller.abort();
 	release();

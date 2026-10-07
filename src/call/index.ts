@@ -1,7 +1,6 @@
 export {
 	type Archive,
 	ArchiveError,
-	type ArchivedFile,
 	type CallJson,
 	type Content,
 	type ContentEntry,

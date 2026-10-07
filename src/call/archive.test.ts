@@ -122,7 +122,7 @@ test("a call that breaks the spec is refused, naming why, its contents as they a
 	await refused(call({ files: { a: { mode: "in", kind: "file", base: "../x" } }, args: {} }, []), "call.json: `files`.a: `base` is a base name, not empty, `.` or `..`, with no / and no NUL");
 	await refused(call({ files: { a: { mode: "share", kind: "file", base: "a" } }, args: {} }, []), 'call.json: `files`.a: `mode` is "in", "out" or "inout"');
 	await refused(call({ files: { a: { mode: "in", base: "a" } }, args: {} }, []), 'call.json: `files`.a: `kind` is "file" or "dir"');
-	await refused(call({ files: { a: { mode: "out", kind: "file", base: "x" } }, args: {} }, []), "call.json: `files`.a: an `out` has no `kind`, since it has no content");
+	await refused(call({ files: { a: { mode: "out", kind: "link", base: "x" } }, args: {} }, []), 'call.json: `files`.a: `kind` is "file" or "dir"');
 	await refused(call({ files: {}, args: {}, tau: { kind: "dir" } }, []), "call.json: `tau` is true, when the call carries its tau");
 	await refused(call({ files: {}, args: {}, tau: true }, [["tau", "x"]]), "tau is a file, but call.json says it is a directory");
 	await refused(call(DIR, []), "call.json names files/site, but the archive does not hold it");

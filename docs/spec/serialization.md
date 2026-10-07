@@ -49,14 +49,15 @@ when the call carries its tau, and no other key:
 ```
 
 - `files` has each file of the call, by its name, in place of its path, the caller's paths staying
-  the caller's: its `mode`, as the tau declares it, or the call gives it for an extra file; its `base`, the base name of its path,
-  or, for an `in` file given a list of paths, its name, which its place keeps (see
-  [Running](running.md)): not empty, not `.` or `..`, with no `/` and no NUL; and, for an `in` or
-  an `inout`, `kind`, what its content is, `file` or `dir`, so that a call that does not fit the
-  tau can be refused before its content is read. An `in` file given a list of paths is a `dir`,
-  holding what is at each path under its base name. Each `in` and `inout` file has its content in
-  the archive, at `files/<name>`; an `out` has none, since what its place holds at first is not
-  specified.
+  the caller's: its `mode`, as the tau declares it, or the call gives it for an extra file; its
+  `base`, the base name of its path, or, for an `in` file given a list of paths, its name, which
+  its place keeps (see [Running](running.md)): not empty, not `.` or `..`, with no `/` and no NUL;
+  and its `kind`, `file` or `dir`: for an `in` or an `inout`, what its content is, so that a call
+  that does not fit the tau can be refused before its content is read; for an `out`, optional,
+  what the agent leaves there, as the tau or the call says. An `in` file given a list of paths is
+  a `dir`, holding what is at each path under its base name. Each `in` and `inout` file has its
+  content in the archive, at `files/<name>`; an `out` has none, since what its place holds at
+  first is not specified.
 - `args` are the call's args, as the caller gave them, their placeholders not yet expanded.
 - The tau, when the call carries it, is the directory at `tau/`, as [Directory](directory.md) has
   it, whose symlinks lead inside it. It may come first, so that a runtime can read the tau, and

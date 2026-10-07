@@ -1,10 +1,9 @@
 import { chmod, cp, lstat, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { type BoundFile, type Caller, checkInputs, checkOutputs, type Json, loadTau } from "../tau/tau.js";
+import { type CallFile, type CheckedCall, checkInputs, checkOutputs, loadTau } from "../tau/tau.js";
 import {
 	type Archive,
-	type ArchivedFile,
 	type CallJson,
 	type ContentSource,
 	extractContent,
@@ -57,31 +56,29 @@ export interface Runtime {
 
 /**
  * The archive of a run of the tau at `tauDir` for `call` (docs/spec/serialization.md), and its
- * targets: the tau read, the call bound and the files' paths checked as a runtime would
+ * targets: the tau read, the call resolved against `cwd` and its paths checked as a runtime would
  * (docs/spec/library.md), then the content of each `in` and `inout` file, and, unless `tau` is
  * false, the tau's, first. The archive reads the files as it is read.
  */
-export function packCall(tauDir: string, call: unknown, caller: Caller, options: { readonly tau?: boolean } = {}): PackedCall {
+export function packCall(tauDir: string, call: unknown, cwd: string, options: { readonly tau?: boolean } = {}): PackedCall {
 	const tau = loadTau(tauDir);
-	// Where the agent sees each file is the runtime's: here, only the caller's paths count.
-	const run = tau.bind(call, caller, ({ host, base }) => (typeof host === "string" ? host : base));
-	checkInputs(run);
-	// The tau first, so that a runtime can read it, and bind the call, before it reads the rest.
+	const resolved = tau.resolve(call, cwd);
+	checkInputs(resolved);
+	// The tau first, so that a runtime can read it, and check the call, before it reads the rest.
 	const contents: ContentSource[] = options.tau === false ? [] : [{ from: tau.dir }];
 	const targets: Record<string, string> = {};
-	const files: Record<string, ArchivedFile> = {};
-	for (const { name, mode, base, host } of run.files) {
-		if (mode === "out") {
-			targets[name] = host as string;
-			files[name] = { mode, base };
+	const files: Record<string, CallFile> = {};
+	for (const [name, file] of Object.entries(resolved.files)) {
+		const from = resolved.paths[name] as string | readonly string[];
+		if (file.mode !== "in") targets[name] = from as string;
+		if (file.mode === "out") {
+			files[name] = file;
 			continue;
 		}
-		if (mode === "inout") targets[name] = host as string;
-		files[name] = { mode, base, kind: typeof host === "string" ? kindAt(host) : "dir" };
-		contents.push({ file: name, from: host as string | readonly string[] });
+		files[name] = { ...file, kind: typeof from === "string" ? kindAt(from) : "dir" };
+		contents.push({ file: name, from });
 	}
-	const args = ((call as { args?: { [name: string]: Json } }).args ?? {}) as { [name: string]: Json };
-	const json: CallJson = { files, args, ...(options.tau === false ? {} : { tau: true }) };
+	const json: CallJson = { files, args: resolved.args, ...(options.tau === false ? {} : { tau: true }) };
 	return { tauDir: tau.dir, archive: writeCall(json, contents), targets };
 }
 
@@ -112,20 +109,20 @@ export async function applyResult(archive: AsyncIterable<Uint8Array>, targets: T
 }
 
 /**
- * Place a call where the agent works: the content of each `in` and `inout` file at its view, and
- * the tau at `tau`, when given. Each place is not there yet; the directories it lies in are made,
- * as they are for each `out` file's place, which is left empty. Contents placed nowhere are read
- * past.
+ * Place a call where the agent works: the content of each `in` and `inout` file at its place, in
+ * `places`, and the tau at `tau`, when given. Each place is not there yet; the directories it lies
+ * in are made, as they are for each `out` file's place, which is left empty. Contents placed
+ * nowhere are read past.
  */
-export async function placeCall(call: Archive<CallJson>, at: { readonly files?: readonly BoundFile[]; readonly tau?: string }): Promise<void> {
+export async function placeCall(call: Archive<CallJson>, at: { readonly places?: { readonly [name: string]: string }; readonly tau?: string }): Promise<void> {
 	const places = new Map<string | undefined, string>();
 	if (at.tau !== undefined) {
 		if (call.json.tau !== true) throw new Error("the call does not carry its tau");
 		places.set(undefined, at.tau);
 	}
-	for (const file of at.files ?? []) {
-		if (file.mode === "out") await mkdir(path.dirname(file.view), { recursive: true });
-		else places.set(file.name, file.view);
+	for (const [name, place] of Object.entries(at.places ?? {})) {
+		if (call.json.files[name]?.mode === "out") await mkdir(path.dirname(place), { recursive: true });
+		else places.set(name, place);
 	}
 	for await (const content of call.contents) {
 		const to = places.get(content.file);
@@ -136,16 +133,16 @@ export async function placeCall(call: Archive<CallJson>, at: { readonly files?: 
 }
 
 /**
- * A result's archive, once the run ended as `outcome` says: if the run succeeded, what the agent
- * left at each `out` and `inout` file, where `locate` finds it, by default its view, checked as
+ * A result's archive, once the run of `call` ended as `outcome` says: if the run succeeded, what
+ * the agent left at each `out` and `inout` file's place, where `places` finds it, checked as
  * docs/spec/paths.md asks; if that does not fit, the run failed, with why, and gives back nothing.
  * The archive reads the files as it is read.
  */
-export function packResult(outcome: Result, files: readonly BoundFile[], locate: (file: BoundFile) => string = ({ view }) => view): AsyncGenerator<Uint8Array> {
+export function packResult(outcome: Result, call: Pick<CheckedCall, "files">, places: { readonly [name: string]: string }): AsyncGenerator<Uint8Array> {
 	let result: Result = outcome.ok ? { ok: true, text: outcome.text } : outcome;
 	if (result.ok) {
 		try {
-			checkOutputs({ files }, locate);
+			checkOutputs(call, places);
 		} catch (error) {
 			result = { ok: false, text: result.text, failure: error instanceof Error ? error.message : String(error) };
 		}
@@ -153,25 +150,25 @@ export function packResult(outcome: Result, files: readonly BoundFile[], locate:
 	const outputs: Record<string, Output> = {};
 	const contents: ContentSource[] = [];
 	if (result.ok) {
-		for (const file of files) {
-			if (file.mode === "in") continue;
-			const from = locate(file);
-			contents.push({ file: file.name, from });
-			outputs[file.name] = { kind: kindAt(from) };
+		for (const [name, { mode }] of Object.entries(call.files)) {
+			if (mode === "in") continue;
+			const from = places[name] as string;
+			contents.push({ file: name, from });
+			outputs[name] = { kind: kindAt(from) };
 		}
 	}
 	return writeResult({ ...result, outputs }, contents);
 }
 
 /**
- * Whether a result fits the run whose files are `files`, as one from a runtime the caller does not
- * trust must: each output is an `out` or `inout` file's, of the kind it declares; and if the run
- * succeeded, every such file has one.
+ * Whether a result fits the run of `call`, as one from a runtime the caller does not trust must:
+ * each output is an `out` or `inout` file's, of the kind it is; and if the run succeeded, every
+ * such file has one.
  * @throws listing every problem.
  */
-export function checkResult(result: ResultJson, files: readonly Pick<BoundFile, "name" | "mode" | "kind">[]): void {
+export function checkResult(result: ResultJson, call: Pick<CheckedCall, "files">): void {
 	const problems: string[] = [];
-	const given = new Map(files.filter(({ mode }) => mode !== "in").map((file) => [file.name, file]));
+	const given = new Map(Object.entries(call.files).filter(([, { mode }]) => mode !== "in"));
 	for (const [name, { kind }] of Object.entries(result.outputs)) {
 		const file = given.get(name);
 		if (file === undefined) {
@@ -186,14 +183,14 @@ export function checkResult(result: ResultJson, files: readonly Pick<BoundFile, 
 }
 
 /**
- * Run the tau at `tauDir` for `call` on `runtime`, and wait for it to end: pack the call, start it,
- * finish it, and put what it gives back at the caller's paths. Aborting `signal` cancels the run,
- * which then fails, and is finished all the same.
+ * Run the tau at `tauDir` for `call` on `runtime`, and wait for it to end: pack the call, its
+ * paths resolved against `cwd`, start it, finish it, and put what it gives back at the caller's
+ * paths. Aborting `signal` cancels the run, which then fails, and is finished all the same.
  * @throws when the run cannot start, such as when the call does not fit the tau.
  */
-export async function runTau(runtime: Runtime, tauDir: string, call: unknown, caller: Caller, signal?: AbortSignal): Promise<Result> {
+export async function runTau(runtime: Runtime, tauDir: string, call: unknown, cwd: string, signal?: AbortSignal): Promise<Result> {
 	signal?.throwIfAborted();
-	const id = await runtime.start(packCall(tauDir, call, caller));
+	const id = await runtime.start(packCall(tauDir, call, cwd));
 	const cancel = (): void => {
 		runtime.cancel(id).catch(() => {});
 	};

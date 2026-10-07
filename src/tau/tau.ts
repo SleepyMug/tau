@@ -44,61 +44,60 @@ export interface Tau {
 	readonly exposes: readonly string[] | undefined;
 	/**
 	 * The command a runtime runs, with `sh -c`, before the agent, which may do the run without it
-	 * (docs/spec/init.md), as tau.json gives it; undefined without one. `bind` expands it.
+	 * (docs/spec/init.md), as tau.json gives it; undefined without one. `expand` expands it.
 	 */
 	readonly init: string | undefined;
 	/**
-	 * One run, for `call` (docs/spec/calls.md): a path for each file, and for each extra file, with
-	 * its mode, resolved against `caller.cwd`, and given its place by `place`, called for each file
-	 * in the order tau.json declares them, then for each extra file in the call's order, by default
-	 * the path itself; the args checked against the schema; and the
-	 * placeholders of the args, the prompt and init expanded (docs/spec/placeholders.md), with
-	 * `${self}` where the agent sees the tau's own directory, `self`, by default `dir`. A file may
-	 * also be as an archive's call has it (docs/spec/serialization.md), naming its content in place
-	 * of a path, whose kind is checked, and which `place` then places. Throws TypeError, listing
-	 * every problem.
+	 * The caller's side of a run: `call`, as a caller gives it (docs/spec/calls.md), checked against
+	 * the tau, each path resolved against `cwd`. Throws TypeError, listing every problem.
 	 */
-	bind(call: unknown, caller: Caller, place?: (file: Placing) => string, self?: string): Run;
+	resolve(call: unknown, cwd: string): ResolvedCall;
+	/**
+	 * A call that reached a runtime as an archive's call has it (docs/spec/serialization.md), its
+	 * form checked by `readCall`, checked against the tau, as one from a caller the runtime does
+	 * not trust must be: each file's mode and kind, and the args. Throws TypeError, listing every
+	 * problem.
+	 */
+	check(call: CheckedCall): CheckedCall;
+	/**
+	 * The agent's side of a run: the args, the prompt and init of `call`, a call `resolve` or
+	 * `check` gave, their placeholders expanded (docs/spec/placeholders.md), with `places`, where
+	 * the agent sees each file, by name, and `self`, where it sees the tau's own directory, by
+	 * default `dir`. Throws TypeError for a file with no place.
+	 */
+	expand(call: CheckedCall, places: { readonly [name: string]: string }, self?: string): Expanded;
 }
 
-/** Who runs the tau. */
-export interface Caller {
-	/** What relative paths in the call are resolved against. */
-	readonly cwd: string;
-}
-
-/** A file of a call, as its runtime is asked to place it. */
-export interface Placing {
-	/** Its name, as tau.json declares it, or the call gives it, for an extra file. */
-	readonly name: string;
+/** A file of a call, checked against the tau. */
+export interface CallFile {
 	readonly mode: Mode;
 	/**
-	 * What it is: as tau.json declares it, or the call gives it; or else `dir` for an `in` given a
-	 * list of paths, or what an archive's call says its content is; undefined while it may be
-	 * either.
+	 * What it is, as tau.json declares it, or the call gives it; for an `in` given a list of paths,
+	 * `dir`; undefined while it may be either.
 	 */
 	readonly kind?: Kind;
 	/** The base name its place keeps: its path's, or its name, for an `in` given a list of paths. */
 	readonly base: string;
-	/**
-	 * The caller's path, absolute, or, for an `in` given a list, each of its paths; none for an
-	 * archive's call, which names the file's content instead.
-	 */
-	readonly host?: string | readonly string[];
 }
 
-/** A file of a call, placed. */
-export interface BoundFile extends Placing {
-	/** Where the agent sees it, absolute. */
-	readonly view: string;
+/** A call, checked against its tau: what an archive's call holds (docs/spec/serialization.md). */
+export interface CheckedCall {
+	/** Each file, by name: those tau.json declares, in its order, then the extra files, in the call's. */
+	readonly files: { readonly [name: string]: CallFile };
+	/** The args, as the caller gave them, their placeholders not yet expanded. */
+	readonly args: { readonly [name: string]: Json };
 }
 
-/** What a runtime needs to set up one run: computed, not done. */
-export interface Run {
+/** A call as a caller gives it, checked, with the caller's paths. */
+export interface ResolvedCall extends CheckedCall {
+	/** Each file's path, by name, absolute, or, for an `in` given a list, each of its paths. */
+	readonly paths: { readonly [name: string]: string | readonly string[] };
+}
+
+/** What the agent is given, once each file has its place. */
+export interface Expanded {
 	/** PROMPT.md, its placeholders expanded. */
 	readonly prompt: string;
-	/** Each file, placed, in the order tau.json declares them, then each extra file, in the call's order. */
-	readonly files: readonly BoundFile[];
 	/** The args, their placeholders expanded: what the agent's programs are given. */
 	readonly args: { readonly [name: string]: Json };
 	/** The tau's init, its placeholders expanded, each one word for `sh`; undefined without one. */
@@ -156,115 +155,164 @@ export function loadTau(dir: string): Tau {
 		args,
 		exposes,
 		init,
-		bind(call, caller, place = placeAtHost, self = absolute) {
+		resolve(call, cwd) {
 			const problems: string[] = [];
-			const { files: given = {}, args: givenArgs = {}, ...rest } = isObject(call) ? call : {};
-			if (!isObject(call)) problems.push('the call must be an object, {"files": {...}, "args": {...}}');
-			for (const key of Object.keys(rest)) problems.push(`the call has no ${JSON.stringify(key)}, only "files" and "args"`);
-			const placings: Placing[] = [];
-			if (!isObject(given)) problems.push("`files` must be an object, from each file's name to its path");
-			else {
-				const missing = Object.keys(files).filter((name) => !Object.hasOwn(given, name));
-				if (missing.length > 0) problems.push(`no path for ${missing.join(", ")}`);
-				const argNames = new Set([...declaredArgs, ...(isObject(givenArgs) ? Object.keys(givenArgs) : [])]);
-				const extras = Object.keys(given).filter((name) => !Object.hasOwn(files, name));
-				for (const name of [...Object.keys(files).filter((name) => Object.hasOwn(given, name)), ...extras]) {
+			const { files: given, args: givenArgs } = callParts(call, problems);
+			const resolved: Record<string, CallFile> = {};
+			const paths: Record<string, string | readonly string[]> = {};
+			if (given !== undefined)
+				for (const name of fileNames(files, given, problems)) {
 					const problem = (text: string): void => void problems.push(`${name}: ${text}`);
-					const declared = files[name];
-					if (declared === undefined) {
-						if (!NAME.test(name)) {
-							problem(`is not a file's name, which matches ${NAME.source}`);
-							continue;
-						}
-						if (name === SELF) {
-							problem("names the tau's own directory, which no file does");
-							continue;
-						}
-						if (argNames.has(name)) {
-							problem("is an arg's name, which no file has");
-							continue;
-						}
-					}
-					const placing = placingOf(name, declared, given[name], caller, problem);
-					if (placing !== undefined) placings.push(placing);
+					if (!Object.hasOwn(files, name) && extraProblem(name, declaredArgs, givenArgs, problem)) continue;
+					const file = resolveFile(name, files[name], given[name], cwd, problem);
+					if (file === undefined) continue;
+					resolved[name] = file.file;
+					paths[name] = file.paths;
 				}
-			}
-			if (!isObject(givenArgs)) problems.push("`args` must be an object");
-			else {
-				for (const name of Object.keys(givenArgs)) {
-					if (Object.hasOwn(files, name)) problems.push(`args.${name}: is a file's name, which no arg has`);
-					else if (name === SELF) problems.push(`args.${SELF}: names the tau's own directory, which no arg does`);
-				}
-				if (validate === undefined) {
-					if (Object.keys(givenArgs).length > 0) problems.push(`the tau takes no args, but is given ${Object.keys(givenArgs).join(", ")}`);
-				} else if (!validate(givenArgs)) problems.push(...(validate.errors ?? []).map(schemaProblem));
-			}
+			if (givenArgs !== undefined) problems.push(...argsProblems(givenArgs, files, validate));
 			if (problems.length > 0) throw new TypeError(`the call does not fit the tau:\n  ${problems.join("\n  ")}`);
-			const bound = placings.map((placing) => ({ ...placing, view: place(placing) }));
-			const places = new Map([...bound.map(({ name, view }) => [name, view] as const), [SELF, self] as const]);
-			const expandedArgs = expandArgs(givenArgs as { readonly [name: string]: Json }, places) as { readonly [name: string]: Json };
+			return { files: resolved, paths, args: givenArgs ?? {} };
+		},
+		check(call) {
+			const problems: string[] = [];
+			const checked: Record<string, CallFile> = {};
+			for (const name of fileNames(files, call.files, problems)) {
+				const problem = (text: string): void => void problems.push(`${name}: ${text}`);
+				const declared = files[name];
+				if (declared === undefined && extraProblem(name, declaredArgs, call.args, problem)) continue;
+				const { mode, kind, base } = call.files[name] as CallFile;
+				const misfit = fitProblem(declared, mode, kind);
+				if (misfit !== undefined) {
+					problem(misfit);
+					continue;
+				}
+				const known = kind ?? declared?.kind;
+				checked[name] = { mode, ...(known === undefined ? {} : { kind: known }), base };
+			}
+			problems.push(...argsProblems(call.args, files, validate));
+			if (problems.length > 0) throw new TypeError(`the call does not fit the tau:\n  ${problems.join("\n  ")}`);
+			return { files: checked, args: call.args };
+		},
+		expand(call, places, self = absolute) {
+			const placeOf = new Map<string, string>();
+			for (const name of Object.keys(call.files)) {
+				const place = places[name];
+				if (typeof place !== "string") throw new TypeError(`${name}: has no place`);
+				placeOf.set(name, place);
+			}
+			placeOf.set(SELF, self);
+			const expandedArgs = expandArgs(call.args, placeOf) as { readonly [name: string]: Json };
 			return {
 				prompt: expand(template, (names) => {
 					const [first = ""] = names;
-					const view = names.length === 1 ? places.get(first) : undefined;
-					return view ?? argText(expandedArgs, names);
+					const place = names.length === 1 ? placeOf.get(first) : undefined;
+					return place ?? argText(expandedArgs, names);
 				}),
-				files: bound,
 				args: expandedArgs,
-				init: command === undefined ? undefined : expand(command, ([first = ""]) => shellWord(places.get(first) as string)),
+				init: command === undefined ? undefined : expand(command, ([first = ""]) => shellWord(placeOf.get(first) as string)),
 			};
 		},
 	};
 }
 
-/** Where a file is by default: the caller's path itself, which an archive's call has not. */
-function placeAtHost({ name, host }: Placing): string {
-	if (host === undefined) throw new TypeError(`${name}: an archive's call names no path of the caller's, so the runtime places it`);
-	if (typeof host !== "string") throw new TypeError(`${name}: is given several paths, so the runtime places it, as a directory holding each`);
-	return host;
+/** The call's files and args, each undefined, its problem recorded, when it is not an object. */
+function callParts(call: unknown, problems: string[]): { files?: Record<string, unknown>; args?: { [name: string]: Json } } {
+	if (!isObject(call)) {
+		problems.push('the call must be an object, {"files": {...}, "args": {...}}');
+		return {};
+	}
+	const { files = {}, args = {}, ...rest } = call;
+	for (const key of Object.keys(rest)) problems.push(`the call has no ${JSON.stringify(key)}, only "files" and "args"`);
+	if (!isObject(files)) problems.push("`files` must be an object, from each file's name to its path");
+	if (!isObject(args)) problems.push("`args` must be an object");
+	return { ...(isObject(files) ? { files } : {}), ...(isObject(args) ? { args: args as { [name: string]: Json } } : {}) };
 }
 
 /**
- * The file `name`, as `given` in a call: a path; for an `in` whose kind is not `file`, a list of
- * paths whose base names differ; the file with its mode, `{mode, path, kind}`; or an archive's file
- * (docs/spec/serialization.md), `{mode, base, kind}`. For a file tau.json declares, `declared`,
- * the mode and kind given fit the declaration; an extra file is given with its mode. Undefined once
- * its problem is recorded.
+ * The names of the files `given`: those tau.json declares, in its order, then the extra files, in
+ * the call's; a declared file not given is a problem.
  */
-function placingOf(name: string, declared: FileDeclaration | undefined, given: unknown, caller: Caller, problem: (text: string) => void): Placing | undefined {
+function fileNames(declared: { readonly [name: string]: FileDeclaration }, given: object, problems: string[]): string[] {
+	const missing = Object.keys(declared).filter((name) => !Object.hasOwn(given, name));
+	if (missing.length > 0) problems.push(`no path for ${missing.join(", ")}`);
+	return [...Object.keys(declared).filter((name) => Object.hasOwn(given, name)), ...Object.keys(given).filter((name) => !Object.hasOwn(declared, name))];
+}
+
+/**
+ * Whether an extra file's name is one no file can have: not a name, `self`, or an arg's, which the
+ * schema declares, or the call gives; its problem recorded.
+ */
+function extraProblem(name: string, declaredArgs: ReadonlySet<string>, args: object | undefined, problem: (text: string) => void): boolean {
+	if (!NAME.test(name)) problem(`is not a file's name, which matches ${NAME.source}`);
+	else if (name === SELF) problem("names the tau's own directory, which no file does");
+	else if (declaredArgs.has(name) || (args !== undefined && Object.hasOwn(args, name))) problem("is an arg's name, which no file has");
+	else return false;
+	return true;
+}
+
+/** Why a file of `mode` and `kind`, if given, does not fit what tau.json declares, if it declares it. */
+function fitProblem(declared: FileDeclaration | undefined, mode: Mode, kind: Kind | undefined): string | undefined {
+	if (declared === undefined) return undefined;
+	if (mode !== declared.mode) return `is an \`${mode}\` in the call, and an \`${declared.mode}\` in the tau`;
+	if (declared.kind !== undefined && kind !== undefined && kind !== declared.kind) return `holds ${article(kind)}, where ${article(declared.kind)} goes`;
+	return undefined;
+}
+
+/** The problems of `args`, which tau.json's schema checks, its names neither a file's nor `self`. */
+function argsProblems(args: { readonly [name: string]: Json }, files: { readonly [name: string]: FileDeclaration }, validate: ValidateFunction | undefined): string[] {
+	const problems: string[] = [];
+	for (const name of Object.keys(args)) {
+		if (Object.hasOwn(files, name)) problems.push(`args.${name}: is a file's name, which no arg has`);
+		else if (name === SELF) problems.push(`args.${SELF}: names the tau's own directory, which no arg does`);
+	}
+	if (validate === undefined) {
+		if (Object.keys(args).length > 0) problems.push(`the tau takes no args, but is given ${Object.keys(args).join(", ")}`);
+	} else if (!validate(args)) problems.push(...(validate.errors ?? []).map(schemaProblem));
+	return problems;
+}
+
+/**
+ * The file `name`, as `given` in a call (docs/spec/calls.md): a path; for an `in` whose kind is
+ * not `file`, a list of paths whose base names differ; or the file with its mode, `{mode, path,
+ * kind}`, which an extra file is given as. For a file tau.json declares, `declared`, the mode and
+ * kind given fit it. Undefined once its problem is recorded.
+ */
+function resolveFile(
+	name: string,
+	declared: FileDeclaration | undefined,
+	given: unknown,
+	cwd: string,
+	problem: (text: string) => void,
+): { file: CallFile; paths: string | readonly string[] } | undefined {
 	let paths = given;
 	let mode = declared?.mode;
 	let kind = declared?.kind;
 	if (isObject(given)) {
-		const archived = archivedFile(given);
-		const stated = archived ?? modedFile(given);
-		if (stated === undefined)
-			return void problem(`${JSON.stringify(given)} is neither a path, a list of paths, a file with its mode, {mode, path, kind}, nor an archive's file, {mode, base, kind}`);
-		if (declared !== undefined && stated.mode !== declared.mode) return void problem(`is an \`${stated.mode}\` in the call, and an \`${declared.mode}\` in the tau`);
-		if (declared?.kind !== undefined && stated.kind !== undefined && stated.kind !== declared.kind)
-			return void problem(`holds ${article(stated.kind)}, where ${article(declared.kind)} goes`);
+		const stated = modedFile(given);
+		if (stated === undefined) return void problem(`${JSON.stringify(given)} is neither a path, a list of paths, nor a file with its mode, {mode, path, kind}`);
+		const misfit = fitProblem(declared, stated.mode, stated.kind);
+		if (misfit !== undefined) return void problem(misfit);
 		mode = stated.mode;
 		kind = stated.kind ?? kind;
-		if (archived !== undefined) return { name, mode, ...(kind === undefined ? {} : { kind }), base: archived.base };
 		paths = given.path;
 	}
 	if (mode === undefined) return void problem(`is no file the tau declares, so the call gives its mode, as {"mode": "in", "path": ${JSON.stringify(given)}}`);
 	if (typeof paths === "string") {
 		if (paths === "") return void problem("a path cannot be empty");
-		const host = path.resolve(caller.cwd, paths);
-		return { name, mode, ...(kind === undefined ? {} : { kind }), base: path.basename(host), host };
+		const host = path.resolve(cwd, paths);
+		return { file: { mode, ...(kind === undefined ? {} : { kind }), base: path.basename(host) }, paths: host };
 	}
 	if (Array.isArray(paths)) {
 		if (mode !== "in" || kind === "file") return void problem("is given a list of paths, which only an `in` that may be a directory takes");
 		const hosts: string[] = [];
 		for (const item of paths) {
 			if (typeof item !== "string" || item === "") return void problem(`${JSON.stringify(item)} is not a path`);
-			hosts.push(path.resolve(caller.cwd, item));
+			hosts.push(path.resolve(cwd, item));
 		}
 		const bases = hosts.map((host) => path.basename(host));
 		const twice = bases.filter((base, index) => bases.indexOf(base) !== index);
 		if (twice.length > 0) return void problem(`is given several paths named ${[...new Set(twice)].join(", ")}, which one directory cannot hold`);
-		return { name, mode, kind: "dir", base: name, host: hosts };
+		return { file: { mode, kind: "dir", base: name }, paths: hosts };
 	}
 	return void problem(`${JSON.stringify(paths)} is not a path`);
 }
@@ -275,22 +323,6 @@ function modedFile(value: Record<string, unknown>): { mode: Mode; kind?: Kind } 
 	if (Object.keys(rest).length > 0 || paths === undefined || !MODES.includes(mode as Mode)) return undefined;
 	if (kind !== undefined && !KINDS.includes(kind as Kind)) return undefined;
 	return { mode: mode as Mode, ...(kind === undefined ? {} : { kind: kind as Kind }) };
-}
-
-/**
- * A file as an archive's call has it (docs/spec/serialization.md): `{mode, base, kind}` for an
- * `in` or an `inout`, `{mode, base}` for an `out`; or undefined when it is not one.
- */
-function archivedFile(value: Record<string, unknown>): { mode: Mode; base: string; kind?: Kind } | undefined {
-	const { mode, base, kind, ...rest } = value;
-	if (Object.keys(rest).length > 0 || !MODES.includes(mode as Mode) || !isBase(base)) return undefined;
-	if (mode === "out") return kind === undefined ? { mode, base } : undefined;
-	return KINDS.includes(kind as Kind) ? { mode: mode as Mode, base, kind: kind as Kind } : undefined;
-}
-
-/** A base name: not empty, not `.` or `..`, with no `/` and no NUL. */
-function isBase(value: unknown): value is string {
-	return typeof value === "string" && value !== "" && value !== "." && value !== ".." && !/[/\0]/u.test(value);
 }
 
 /** A problem JSON Schema found in the args, where it is in them. */
@@ -329,15 +361,15 @@ function article(kind: Kind): string {
 }
 
 /**
- * Before a run: whether the files' paths fit the tau (docs/spec/paths.md). Each `in` and `inout`
+ * Before a run: whether the caller's paths fit the call (docs/spec/paths.md). Each `in` and `inout`
  * path is a file or a directory as its kind says, and each of a list's either, and holds what a
  * path may (see `valueProblems`); each `out` path lies in a directory that exists, and is not
  * there yet, or is of its kind, symlinks followed. Paths may overlap. Throws, listing every problem.
  */
-export function checkInputs(run: Run): void {
+export function checkInputs(call: ResolvedCall): void {
 	const problems: string[] = [];
-	for (const { name, mode, kind, host } of run.files) {
-		// An archive's file names content, which its reader checked.
+	for (const [name, { mode, kind }] of Object.entries(call.files)) {
+		const host = call.paths[name];
 		if (host === undefined) continue;
 		if (typeof host !== "string") {
 			for (const item of host) problems.push(...valueProblems(item, undefined).map((problem) => `${name}: ${problem}`));
@@ -360,20 +392,20 @@ export function checkInputs(run: Run): void {
 }
 
 /**
- * When the run ends, if the agent returned normally: whether it left what the tau declares. What
- * `locate` finds of each `out` and `inout` file is a file or a directory as its kind says, and
- * holds what a path may (see `valueProblems`): by default its view, which is right for a runtime
- * whose agent works on the runtime's own machine; one whose agent works elsewhere, such as in a
- * container, checks where it can. Throws, listing every problem.
+ * When the run ends, if the agent returned normally: whether it left what the call asks. What is at
+ * each `out` and `inout` file's place, in `places`, is a file or a directory as its kind says, and
+ * holds what a path may (see `valueProblems`). A runtime whose agent works elsewhere, such as in a
+ * container, gives where it finds each place. Throws, listing every problem.
  */
-export function checkOutputs(run: Pick<Run, "files">, locate: (file: BoundFile) => string = ({ view }) => view): void {
+export function checkOutputs(call: Pick<CheckedCall, "files">, places: { readonly [name: string]: string }): void {
 	const problems: string[] = [];
-	for (const file of run.files) {
-		if (file.mode === "in") continue;
-		problems.push(...valueProblems(locate(file), file.kind).map((problem) => `${file.name}: ${problem}`));
+	for (const [name, { mode, kind }] of Object.entries(call.files)) {
+		if (mode === "in") continue;
+		const place = places[name];
+		if (place === undefined) problems.push(`${name}: has no place`);
+		else problems.push(...valueProblems(place, kind).map((problem) => `${name}: ${problem}`));
 	}
-	if (problems.length > 0)
-		throw new Error(`the run did not leave what the tau declares:\n  ${problems.join("\n  ")}`);
+	if (problems.length > 0) throw new Error(`the run did not leave what the call asks:\n  ${problems.join("\n  ")}`);
 }
 
 function readMetadata(file: string): {

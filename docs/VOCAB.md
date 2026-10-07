@@ -58,4 +58,5 @@ the [spec](spec/index.md) and the library use these, and no others.
 | type, `text`, `list`, `record`, `of`, `fields` | A file's kind and mode, or the schema: JSON Schema's `string`, `array` and `object`. |
 | `path`, as a kind | A file declared without a kind. |
 | JSON Pointer, blob id | A file's name, which keys outputs and names content in an archive. |
+| `bind`, `BoundFile`, `Placing`, a file's `host` and `view` | `resolve`, a call on the caller's side, with its paths; `check`, an archive's call on the runtime's; `expand`, with each file's place. |
 | `at`, `share`, `role`, `vars`, `paths`; `args` as a positional list | Earlier designs: places were declared, then are the runtime's; `share` and `role` became modes; texts and paths became files and args. |

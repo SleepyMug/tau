@@ -3,7 +3,7 @@ import { createReadStream, createWriteStream, lstatSync } from "node:fs";
 import { chmod, lstat, mkdir, readdir, readlink, symlink } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import type { Json, Kind, Mode } from "../tau/tau.js";
+import type { CheckedCall, Kind } from "../tau/tau.js";
 import { ArchiveError, type EntryType, readTar, type TarEntry, type WriteEntry, writeTar } from "./tar.js";
 
 /**
@@ -11,19 +11,11 @@ import { ArchiveError, type EntryType, readTar, type TarEntry, type WriteEntry, 
  * from files and directories, and read, checked, as they come, into files and directories again.
  */
 
-/** A file of an archive's call: its mode, the base name its place keeps, and, for an `in` or an `inout`, what its content is. */
-export interface ArchivedFile {
-	readonly mode: Mode;
-	readonly base: string;
-	readonly kind?: Kind;
-}
-
-/** `call.json`. */
-export interface CallJson {
-	/** Each file of the call, by its name. */
-	readonly files: { readonly [name: string]: ArchivedFile };
-	/** The args, as the caller gave them, their placeholders not yet expanded. */
-	readonly args: { readonly [name: string]: Json };
+/**
+ * `call.json`: the call, checked against its tau, each `in` and `inout` file with the kind of its
+ * content, which is at `files/<name>`.
+ */
+export interface CallJson extends CheckedCall {
 	/** True when the call carries its tau, a directory, at `tau/`. */
 	readonly tau?: true;
 }
@@ -344,7 +336,8 @@ function callContents(json: unknown): { value: CallJson; named: Map<string, Kind
 		if (typeof mode !== "string" || !MODES.includes(mode)) throw new TypeError(`${at}: \`mode\` is "in", "out" or "inout"`);
 		checkBase(base, at);
 		if (mode === "out") {
-			if (kind !== undefined) throw new TypeError(`${at}: an \`out\` has no \`kind\`, since it has no content`);
+			// What the agent must leave, if the call says, since an `out` has no content.
+			if (kind !== undefined) checkKind(kind, at);
 			continue;
 		}
 		checkKind(kind, at);
