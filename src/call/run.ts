@@ -4,7 +4,7 @@ import path from "node:path";
 import { type BoundFile, type Caller, checkInputs, checkOutputs, type Json, loadTau } from "../tau/tau.js";
 import {
 	type Archive,
-	type CallFile,
+	type ArchivedFile,
 	type CallJson,
 	type ContentSource,
 	extractContent,
@@ -69,7 +69,7 @@ export function packCall(tauDir: string, call: unknown, caller: Caller, options:
 	// The tau first, so that a runtime can read it, and bind the call, before it reads the rest.
 	const contents: ContentSource[] = options.tau === false ? [] : [{ from: tau.dir }];
 	const targets: Record<string, string> = {};
-	const files: Record<string, CallFile> = {};
+	const files: Record<string, ArchivedFile> = {};
 	for (const { name, mode, base, host } of run.files) {
 		if (mode === "out") {
 			targets[name] = host as string;

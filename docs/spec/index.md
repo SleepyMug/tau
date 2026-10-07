@@ -6,7 +6,7 @@ declares what it takes: **files**, the caller's files and directories, each sayi
 agent reads it, writes it, or both; and **args**, JSON that a JSON Schema describes.
 
 A **runtime**, such as pi-run, runs a tau for a **caller**, who gives a path for each file, and
-the args. The **agent**, the model the runtime runs on the tau's prompt, writes **programs** that
+may give more files, and the args. The **agent**, the model the runtime runs on the tau's prompt, writes **programs** that
 call the APIs, each through the runtime's implementation.
 
 This spec defines a **compiled format**: a tau as runtimes read and run it, as a built package is
@@ -27,7 +27,8 @@ This spec is the reference:
   - [APIs](apis.md): `api/`, what the agent's programs call.
   - [Packages](packages.md): `node_modules/`, code of the tau's own, built on its APIs.
 - A run:
-  - [Calls](calls.md): what a run takes: a path for each file, and the args.
+  - [Calls](calls.md): what a run takes: a path for each file, extra files, and the args; and
+    a call passed on.
   - [Implementations](implementations.md): how a runtime links each API to its implementation.
   - [Running](running.md): the agent's view, and what else it reaches.
   - [Init](init.md): a command run before the agent, which may do the run without it.

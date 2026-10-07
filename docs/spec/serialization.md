@@ -49,7 +49,7 @@ when the call carries its tau, and no other key:
 ```
 
 - `files` has each file of the call, by its name, in place of its path, the caller's paths staying
-  the caller's: its `mode`, which the tau declares for it; its `base`, the base name of its path,
+  the caller's: its `mode`, as the tau declares it, or the call gives it for an extra file; its `base`, the base name of its path,
   or, for an `in` file given a list of paths, its name, which its place keeps (see
   [Running](running.md)): not empty, not `.` or `..`, with no `/` and no NUL; and, for an `in` or
   an `inout`, `kind`, what its content is, `file` or `dir`, so that a call that does not fit the

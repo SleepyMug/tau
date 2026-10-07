@@ -10,12 +10,13 @@ the [spec](spec/index.md) and the library use these, and no others.
 | **tau** | An agent packaged as a directory: Transportable Agent Unit. Written TAU where a model reads it, as in TAU.md. |
 | **prompt** | `PROMPT.md`, what the agent is asked, with its placeholders. |
 | **metadata** | `tau.json`: the tau's description, files, args, what it exposes, and its init. |
-| **file** | A file or a directory of the caller's that the tau takes, by its **name**, which `files` in `tau.json` declares, with its mode, its kind and a description. A file of kind `dir` is a directory: file as Unix means it. Files do not nest. |
+| **file** | A file or a directory of the caller's that the tau takes, by its **name**, which `files` in `tau.json` declares, with its mode, its kind and a description, as what the prompt and init need. A file of kind `dir` is a directory: file as Unix means it. Files do not nest. |
 | **mode** | What the agent does with a file: `in`, reads it; `out`, leaves something there; `inout`, changes it in place. |
 | **kind** | What a file is: `file` or `dir`; a file declared without one may be either. |
 | **args** | The JSON a run takes beside its files: an object, nesting to any depth. **An arg** is one of its properties. |
 | **schema** | `args` in `tau.json`: a JSON Schema (draft 2020-12) that a call's args fit. |
 | **placeholder** | `${name}`, `${a.b}` or `${self}`, in the prompt, in a string of the args, or in init, which **expanding** replaces: a file by its place, `self` by the tau's directory, and, in the prompt, an arg by its value. |
+| **escaped** | A placeholder preceded by `$`: in the args, expanding drops one `$`, so `$${name}` reaches the agent as `${name}`, for a run it makes; in the prompt and init, `$${` is a literal `${`. |
 | **self** | The tau's own directory, as `${self}` names it. |
 | **API** | `api/<name>/`: TypeScript declarations of what the tau's code calls, imported as `@api/<name>`. |
 | **implementation** | The module a runtime gives for an API. |
@@ -34,7 +35,8 @@ the [spec](spec/index.md) and the library use these, and no others.
 | **agent** | The model the runtime runs on the tau's prompt. |
 | **program** | Code the agent runs with `node`, importing what the tau exposes. |
 | **run** | One run of a tau, for one call. |
-| **call** | What a caller gives a run: a path for each file, and the args. |
+| **call** | What a caller gives a run: a path for each file, extra files, and the args. |
+| **extra file** | A file a call gives the agent that `tau.json` does not declare, with its mode, and its kind if any, which the args name, and the tau API gives. |
 | **path** | Where the caller has a file, relative to its working directory or absolute. |
 | **view** | The file system as the agent sees it. |
 | **place** | Where the agent sees a file in its view, which the runtime chooses, keeping the base name of the file's path. |

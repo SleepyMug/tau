@@ -48,9 +48,10 @@ export interface Tau {
 	 */
 	readonly init: string | undefined;
 	/**
-	 * One run, for `call` (docs/spec/calls.md): a path for each file, resolved against
-	 * `caller.cwd`, and given its place by `place`, called for each file in the order tau.json
-	 * declares them, by default the path itself; the args checked against the schema; and the
+	 * One run, for `call` (docs/spec/calls.md): a path for each file, and for each extra file, with
+	 * its mode, resolved against `caller.cwd`, and given its place by `place`, called for each file
+	 * in the order tau.json declares them, then for each extra file in the call's order, by default
+	 * the path itself; the args checked against the schema; and the
 	 * placeholders of the args, the prompt and init expanded (docs/spec/placeholders.md), with
 	 * `${self}` where the agent sees the tau's own directory, `self`, by default `dir`. A file may
 	 * also be as an archive's call has it (docs/spec/serialization.md), naming its content in place
@@ -68,12 +69,13 @@ export interface Caller {
 
 /** A file of a call, as its runtime is asked to place it. */
 export interface Placing {
-	/** Its name, as tau.json declares it. */
+	/** Its name, as tau.json declares it, or the call gives it, for an extra file. */
 	readonly name: string;
 	readonly mode: Mode;
 	/**
-	 * What it is: as tau.json declares it; or else `dir` for an `in` given a list of paths, or what
-	 * an archive's call says its content is; undefined while it may be either.
+	 * What it is: as tau.json declares it, or the call gives it; or else `dir` for an `in` given a
+	 * list of paths, or what an archive's call says its content is; undefined while it may be
+	 * either.
 	 */
 	readonly kind?: Kind;
 	/** The base name its place keeps: its path's, or its name, for an `in` given a list of paths. */
@@ -95,7 +97,7 @@ export interface BoundFile extends Placing {
 export interface Run {
 	/** PROMPT.md, its placeholders expanded. */
 	readonly prompt: string;
-	/** Each file, placed, in the order tau.json declares them. */
+	/** Each file, placed, in the order tau.json declares them, then each extra file, in the call's order. */
 	readonly files: readonly BoundFile[];
 	/** The args, their placeholders expanded: what the agent's programs are given. */
 	readonly args: { readonly [name: string]: Json };
@@ -112,8 +114,8 @@ const MODES: readonly Mode[] = ["in", "out", "inout"];
 const KINDS: readonly Kind[] = ["file", "dir"];
 /** In the prompt and init: `$${` is a literal `${`; any other `${` opens a placeholder. */
 const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
-/** In the args: `${name}`, or `$${name}`, its literal, which only a file's name, or `self`, makes one. */
-const ARG_PLACEHOLDER = /(\$?)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu;
+/** In the args: `${name}`, after any `$`s, each of which escapes it once. */
+const ARG_PLACEHOLDER = /(\$*)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu;
 
 /**
  * The tau at `dir`: its PROMPT.md, and its tau.json if it has one (without it, the tau takes no
@@ -164,11 +166,26 @@ export function loadTau(dir: string): Tau {
 			else {
 				const missing = Object.keys(files).filter((name) => !Object.hasOwn(given, name));
 				if (missing.length > 0) problems.push(`no path for ${missing.join(", ")}`);
-				const unknown = Object.keys(given).filter((name) => !Object.hasOwn(files, name));
-				if (unknown.length > 0) problems.push(`the tau has no file named ${unknown.join(", ")}`);
-				for (const [name, declared] of Object.entries(files)) {
-					if (!Object.hasOwn(given, name)) continue;
-					const placing = placingOf(name, declared, given[name], caller, (text) => problems.push(`${name}: ${text}`));
+				const argNames = new Set([...declaredArgs, ...(isObject(givenArgs) ? Object.keys(givenArgs) : [])]);
+				const extras = Object.keys(given).filter((name) => !Object.hasOwn(files, name));
+				for (const name of [...Object.keys(files).filter((name) => Object.hasOwn(given, name)), ...extras]) {
+					const problem = (text: string): void => void problems.push(`${name}: ${text}`);
+					const declared = files[name];
+					if (declared === undefined) {
+						if (!NAME.test(name)) {
+							problem(`is not a file's name, which matches ${NAME.source}`);
+							continue;
+						}
+						if (name === SELF) {
+							problem("names the tau's own directory, which no file does");
+							continue;
+						}
+						if (argNames.has(name)) {
+							problem("is an arg's name, which no file has");
+							continue;
+						}
+					}
+					const placing = placingOf(name, declared, given[name], caller, problem);
 					if (placing !== undefined) placings.push(placing);
 				}
 			}
@@ -209,20 +226,38 @@ function placeAtHost({ name, host }: Placing): string {
 
 /**
  * The file `name`, as `given` in a call: a path; for an `in` whose kind is not `file`, a list of
- * paths whose base names differ; or an archive's file (docs/spec/serialization.md), `{mode, base,
- * kind}`, whose mode and kind fit the declaration. Undefined once its problem is recorded.
+ * paths whose base names differ; the file with its mode, `{mode, path, kind}`; or an archive's file
+ * (docs/spec/serialization.md), `{mode, base, kind}`. For a file tau.json declares, `declared`,
+ * the mode and kind given fit the declaration; an extra file is given with its mode. Undefined once
+ * its problem is recorded.
  */
-function placingOf(name: string, declared: FileDeclaration, given: unknown, caller: Caller, problem: (text: string) => void): Placing | undefined {
-	const { mode, kind } = declared;
-	if (typeof given === "string") {
-		if (given === "") return void problem("a path cannot be empty");
-		const host = path.resolve(caller.cwd, given);
+function placingOf(name: string, declared: FileDeclaration | undefined, given: unknown, caller: Caller, problem: (text: string) => void): Placing | undefined {
+	let paths = given;
+	let mode = declared?.mode;
+	let kind = declared?.kind;
+	if (isObject(given)) {
+		const archived = archivedFile(given);
+		const stated = archived ?? modedFile(given);
+		if (stated === undefined)
+			return void problem(`${JSON.stringify(given)} is neither a path, a list of paths, a file with its mode, {mode, path, kind}, nor an archive's file, {mode, base, kind}`);
+		if (declared !== undefined && stated.mode !== declared.mode) return void problem(`is an \`${stated.mode}\` in the call, and an \`${declared.mode}\` in the tau`);
+		if (declared?.kind !== undefined && stated.kind !== undefined && stated.kind !== declared.kind)
+			return void problem(`holds ${article(stated.kind)}, where ${article(declared.kind)} goes`);
+		mode = stated.mode;
+		kind = stated.kind ?? kind;
+		if (archived !== undefined) return { name, mode, ...(kind === undefined ? {} : { kind }), base: archived.base };
+		paths = given.path;
+	}
+	if (mode === undefined) return void problem(`is no file the tau declares, so the call gives its mode, as {"mode": "in", "path": ${JSON.stringify(given)}}`);
+	if (typeof paths === "string") {
+		if (paths === "") return void problem("a path cannot be empty");
+		const host = path.resolve(caller.cwd, paths);
 		return { name, mode, ...(kind === undefined ? {} : { kind }), base: path.basename(host), host };
 	}
-	if (Array.isArray(given)) {
-		if (mode !== "in" || kind === "file") return void problem(`is given a list of paths, which only an \`in\` that may be a directory takes`);
+	if (Array.isArray(paths)) {
+		if (mode !== "in" || kind === "file") return void problem("is given a list of paths, which only an `in` that may be a directory takes");
 		const hosts: string[] = [];
-		for (const item of given) {
+		for (const item of paths) {
 			if (typeof item !== "string" || item === "") return void problem(`${JSON.stringify(item)} is not a path`);
 			hosts.push(path.resolve(caller.cwd, item));
 		}
@@ -231,17 +266,15 @@ function placingOf(name: string, declared: FileDeclaration, given: unknown, call
 		if (twice.length > 0) return void problem(`is given several paths named ${[...new Set(twice)].join(", ")}, which one directory cannot hold`);
 		return { name, mode, kind: "dir", base: name, host: hosts };
 	}
-	if (isObject(given)) {
-		const archived = archivedFile(given);
-		if (archived === undefined)
-			return void problem(`${JSON.stringify(given)} is neither a path, a list of paths, nor an archive's file, {mode, base, kind}`);
-		if (archived.mode !== mode) return void problem(`is an \`${archived.mode}\` in the call, and an \`${mode}\` in the tau`);
-		if (kind !== undefined && archived.kind !== undefined && archived.kind !== kind)
-			return void problem(`holds ${article(archived.kind)}, where ${article(kind)} goes`);
-		const known = archived.kind ?? kind;
-		return { name, mode, ...(known === undefined ? {} : { kind: known }), base: archived.base };
-	}
-	return void problem(`${JSON.stringify(given)} is not a path`);
+	return void problem(`${JSON.stringify(paths)} is not a path`);
+}
+
+/** A file given with its mode (docs/spec/calls.md), `{mode, path, kind}`, its path checked later; or undefined when it is not one. */
+function modedFile(value: Record<string, unknown>): { mode: Mode; kind?: Kind } | undefined {
+	const { mode, path: paths, kind, ...rest } = value;
+	if (Object.keys(rest).length > 0 || paths === undefined || !MODES.includes(mode as Mode)) return undefined;
+	if (kind !== undefined && !KINDS.includes(kind as Kind)) return undefined;
+	return { mode: mode as Mode, ...(kind === undefined ? {} : { kind: kind as Kind }) };
 }
 
 /**
@@ -269,14 +302,14 @@ function schemaProblem({ instancePath, message, keyword, params }: ErrorObject):
 
 /**
  * `value`, each string's placeholders expanded (docs/spec/placeholders.md): `${name}`, where
- * `places` has `name`, becomes its place, and `$${name}` a literal `${name}`; anything else stays.
+ * `places` has `name`, becomes its place; after one or more `$`, `${name}` loses one, whatever the
+ * name; anything else stays.
  */
 function expandArgs(value: Json, places: ReadonlyMap<string, string>): Json {
 	if (typeof value === "string")
-		return value.replace(ARG_PLACEHOLDER, (whole, literal: string, name: string) => {
-			const place = places.get(name);
-			if (place === undefined) return whole;
-			return literal === "" ? place : `\${${name}}`;
+		return value.replace(ARG_PLACEHOLDER, (whole, escapes: string, name: string) => {
+			if (escapes !== "") return `${escapes.slice(1)}\${${name}}`;
+			return places.get(name) ?? whole;
 		});
 	if (Array.isArray(value)) return value.map((item) => expandArgs(item, places));
 	if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, expandArgs(item as Json, places)]));

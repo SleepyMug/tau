@@ -103,23 +103,27 @@ A **call** gives each file a path, and the args, as JSON:
   `in`, the agent reads it; `out`, it leaves something there; `inout`, it changes it in place;
   and its `kind`, `file` or `dir`, or, without one, either. A call gives each file a path of the
   caller's, or, for an `in`, a list of paths, which the agent sees as one directory holding each
-  under its base name. Files do not nest.
+  under its base name. Files do not nest. `tau.json` declares the files the prompt and init need;
+  a call may give the agent more, **extra files**, each with its mode, as
+  `"notes": {"mode": "in", "path": "notes.md"}`, which the args name.
 - **Args** are any JSON, nesting to any depth, that fits `args`, a JSON Schema (draft 2020-12) of
   an object.
 - **Placeholders**: `${name}`, naming a file, becomes its **place**, where the agent sees it, and
   `${self}` the tau's own directory, which the agent reads but does not change, in the prompt, in
   every string of the args, at any depth, and in init. The prompt also names args, `${cities}` or
   `${dates.start}`: a string as it is, anything else as JSON, and nothing for what the args lack.
-  In args, `$${trip}` is a literal `${trip}`, and anything else stays as written; in the prompt
-  and init, `$${` is a literal `${`, and any other `${` is refused.
+  In args, a placeholder preceded by `$` loses one, `$${trip}` becoming `${trip}`, and anything
+  else stays as written; in the prompt and init, `$${` is a literal `${`, and any other `${` is
+  refused.
 - An API is declared in `api/<name>/` as TypeScript, whose doc comments say what it does, and the
   runtime implements it, so the tau holds neither its code nor credentials. `node_modules/` holds
   packages built on the APIs. The agent runs its programs with `node`, Node.js 24 or later, as
   JavaScript or as TypeScript Node.js runs as is, and they import what `exposes` lists, by default
   every API, resolving from the tau's directory, as its own code does.
-- The **tau API**, `@api/tau`, gives programs `files()`, the place of each file; `args()`, the
-  args, their placeholders expanded; `run(tau, call)`, which runs another tau and resolves to how
-  it ended; and `TAU_SKIP`, `TAU_RUN` and `TAU_FALLBACK`, init's exit codes.
+- The **tau API**, `@api/tau`, gives programs `files()`, the place of each file, extra files
+  included; `args()`, the args, their placeholders expanded; `run(tau, call)`, which runs another
+  tau and resolves to how it ended; and `TAU_SKIP`, `TAU_RUN` and `TAU_FALLBACK`, init's exit
+  codes.
 - Each directory `skills/<name>/` with a `SKILL.md` is a skill the agent can use.
 - `init`, optional in `tau.json`, here `node ${self}/init.mts`, is a command the runtime runs
   before the agent, in the agent's working directory, each placeholder one word for `sh`: exiting
@@ -131,9 +135,9 @@ A **call** gives each file a path, and the args, as JSON:
 
 A **runtime** runs a tau for a **caller**: a person, a program, or another agent.
 
-- **A call** gives every file a path, and args that fit the schema. A runtime refuses one it
-  cannot carry out as declared: args or a path that do not fit, an API it has no implementation
-  of.
+- **A call** gives every declared file a path, and args that fit the schema. A runtime refuses
+  one it cannot carry out as declared: args or a path that do not fit, an API it has no
+  implementation of.
 - **The run succeeds** if the agent finishes on its own, neither stopped nor failing, or its init
   does the run in its place, and leaves a file or a directory, as declared, at each `out` and
   `inout` file's place. The caller's paths then hold what it left, a directory merging into one
@@ -144,7 +148,10 @@ A **runtime** runs a tau for a **caller**: a person, a program, or another agent
   effect when made, and stay if the run fails. What the agent writes anywhere else is scratch. It
   learns of the caller only what the call gives it.
 - **Runs nest.** An agent that runs a tau is that run's caller, giving paths in its own view, such
-  as the places of its own files, and it can make several runs at once.
+  as the places of its own files, and it can make several runs at once. A caller can hand it a
+  call to make as an arg, its paths naming the files given the agent, `"${trip}"`, and a
+  placeholder for the new run escaped, `"$${trip}/ben.pdf"`, which the agent passes on as
+  `"${trip}/ben.pdf"`.
 
 A tau says what its agent needs, never how: where it runs, which model and tools drive it, how its
 skills and APIs are shown to it and implemented, and what else it finds, such as commands or the

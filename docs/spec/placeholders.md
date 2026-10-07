@@ -17,19 +17,24 @@ In the prompt, `PROMPT.md`:
 - `$${` becomes a literal `${`.
 
 Any other `${` in the prompt is refused when the tau is read: one that is not closed on its line,
-whose first name is neither `self`, nor a file's, nor an arg's that the schema declares in its
-top-level `properties` (see [Metadata](metadata.md)), or that names what lies in `self` or in a
-file.
+whose first name is neither `self`, nor a file's that `tau.json` declares, nor an arg's that the
+schema declares in its top-level `properties` (see [Metadata](metadata.md)), or that names what
+lies in `self` or in a file. The prompt names no extra file, which the tau cannot know of: an arg
+does.
 
 In the args, in every string, at any depth, but not in the names of an object's properties:
-- `${self}` and `${name}` naming a file become as above, so a caller can point the agent into a
-  file, as `"Start from ${site}/index.html"` does;
-- `$${self}`, and `$${name}` for a file's name, become a literal `${self}` and `${name}`;
+- `${self}` and `${name}` naming a file, extra files included (see [Calls](calls.md)), become as
+  above, so a caller can point the agent into a file, as `"Start from ${site}/index.html"` does;
+- `${name}` preceded by one or more `$` loses one, whatever the name: `$${site}` becomes a
+  literal `${site}`, and `$$${site}` becomes `$${site}`. A placeholder meant for a run the agent
+  makes, which it passes on in that run's args, takes one `$` more for each run it passes
+  through, so that each expands it once, and the one it is meant for expands it to a place.
+  Text that holds `$${` as it is, such as a Makefile's, is written with one `$` more;
 - anything else stays as written, so the args can hold code, or templates of their own, as they
   are.
 
 In init (see [Init](init.md)):
-- `${self}` and `${name}` naming a file become as above, each as one word for `sh`, quoted if need
+- `${self}` and `${name}` naming a file that `tau.json` declares become as above, each as one word for `sh`, quoted if need
   be;
 - `$${` becomes a literal `${`.
 

@@ -30,7 +30,8 @@ checkOutputs(run, locate);                                   // 6. check what th
    its paths, the base name its place keeps (`base`), and where the agent sees it (`view`); the
    `args`, their placeholders expanded, to give the agent; the `prompt`, expanded; and the `init`,
    if the tau has one, expanded (see [Placeholders](placeholders.md)). `place` gives each file its
-   view, asked in the order `tau.json` declares them; without it, the view is the caller's path
+   view, asked in the order `tau.json` declares them, then for each extra file, in the call's
+   order; without it, the view is the caller's path
    itself, for a runtime that does not copy, which cannot place an `in` given a list. `${self}`
    becomes `self`, where the agent sees the tau's own directory; without it, where the tau is.
 3. **Check the files.** `checkInputs(run)` checks what [Paths](paths.md) asks when the run starts.

@@ -127,6 +127,32 @@ test("a run travels as a call and a result: packed from the caller's paths, plac
 	assert.deepEqual(readdirSync(path.join(caller, "out", "pages")), ["a.md"]);
 });
 
+test("extra files travel as declared ones do, with the modes the call gives them, and the args name them", async () => {
+	const caller = home("home-extras");
+	const call = {
+		files: { ...CALL.files, notes: { mode: "in", path: "site/kept.md" }, log: { mode: "out", kind: "file", path: "out/log.md" } },
+		args: { tone: "dry", call: { files: { notes: "${notes}" }, args: { start: "$${notes}" } } },
+	};
+	const packed = packCall(TAU, call, { cwd: caller });
+	assert.equal(packed.targets.log, path.join(caller, "out/log.md"));
+	const archive = await bytesOf(packed.archive);
+	const { json } = await readCall(once(archive));
+	assert.deepEqual(Object.entries(json.files).slice(5), [
+		["notes", { mode: "in", base: "kept.md", kind: "file" }],
+		["log", { mode: "out", base: "log.md" }],
+	]);
+
+	const work = path.join(tmp, "work-extras");
+	const { run, result } = await runtimeSide(archive, work, (files) => {
+		edit(files);
+		const view = (name: string) => (files.find((file) => file.name === name) as BoundFile).view;
+		writeFileSync(view("log"), `read ${readFileSync(view("notes"), "utf8")}`);
+	});
+	assert.deepEqual(run.args.call, { files: { notes: `${work}/in/kept.md` }, args: { start: "${notes}" } });
+	assert.deepEqual(await applyResult(once(result), packed.targets), { ok: true, text: "Done." });
+	assert.equal(readFileSync(path.join(caller, "out", "log.md"), "utf8"), "read kept\n");
+});
+
 test("a run whose agent did not leave what the tau declares fails, and gives back nothing", async () => {
 	const caller = home("home2");
 	const packed = packCall(TAU, CALL, { cwd: caller });
@@ -144,7 +170,7 @@ test("the caller's paths are checked when the call is packed, as a runtime would
 	const caller = home("home3");
 	const files = (rules: unknown) => ({ ...CALL, files: { ...CALL.files, rules } });
 	assert.throws(() => packCall(TAU, files("missing.md"), { cwd: caller }), /^Error: the files do not fit the tau:\n {2}rules: \S+\/missing\.md does not exist$/u);
-	assert.throws(() => packCall(TAU, files({ $in: "style.md" }), { cwd: caller }), /rules: \{"\$in":"style\.md"\} is neither a path, a list of paths, nor an archive's file/u);
+	assert.throws(() => packCall(TAU, files({ $in: "style.md" }), { cwd: caller }), /rules: \{"\$in":"style\.md"\} is neither a path, a list of paths, a file with its mode, \{mode, path, kind\}, nor an archive's file/u);
 	assert.throws(() => packCall(TAU, { files: CALL.files }, { cwd: caller }), /args: must have required property 'tone'/u);
 });
 

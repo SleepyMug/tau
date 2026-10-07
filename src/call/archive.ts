@@ -12,7 +12,7 @@ import { ArchiveError, type EntryType, readTar, type TarEntry, type WriteEntry, 
  */
 
 /** A file of an archive's call: its mode, the base name its place keeps, and, for an `in` or an `inout`, what its content is. */
-export interface CallFile {
+export interface ArchivedFile {
 	readonly mode: Mode;
 	readonly base: string;
 	readonly kind?: Kind;
@@ -21,7 +21,7 @@ export interface CallFile {
 /** `call.json`. */
 export interface CallJson {
 	/** Each file of the call, by its name. */
-	readonly files: { readonly [name: string]: CallFile };
+	readonly files: { readonly [name: string]: ArchivedFile };
 	/** The args, as the caller gave them, their placeholders not yet expanded. */
 	readonly args: { readonly [name: string]: Json };
 	/** True when the call carries its tau, a directory, at `tau/`. */

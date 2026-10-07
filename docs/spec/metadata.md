@@ -37,8 +37,9 @@ API.
 Each key is optional, and any other is refused:
 - **`description`** says what the tau does, for whoever runs it. A runtime can show it as usage,
   or offer the tau to another agent as a tool.
-- **`files`** declares the tau's files, from each one's name to what it is (see
-  [Files](#files)). A call gives a path for every one (see [Calls](calls.md)).
+- **`files`** declares the files the tau needs, which its prompt and init name, from each one's
+  name to what it is (see [Files](#files)). A call gives a path for every one, and may give
+  others, with their modes (see [Calls](calls.md)).
 - **`args`** is the **schema** of the args (see [Args](#args)).
 - **`exposes`** names what the agent's programs import, each once: an API, as `@api/<name>` (see
   [APIs](apis.md)), or a package of the tau's own, by its name (see [Packages](packages.md)).

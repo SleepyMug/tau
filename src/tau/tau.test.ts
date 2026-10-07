@@ -111,8 +111,8 @@ test("a call must fit the tau, listing every problem", () => {
 			"the call does not fit the tau:",
 			'  the call has no "more", only "files" and "args"',
 			"  no path for report, guides",
-			"  the tau has no file named extra",
 			"  rules: a path cannot be empty",
+			'  extra: is no file the tau declares, so the call gives its mode, as {"mode": "in", "path": "x"}',
 			"  args.site: is a file's name, which no arg has",
 			"  args: must have required property 'edits'",
 			"  args.opts.tone: must be string",
@@ -125,7 +125,7 @@ test("a call must fit the tau, listing every problem", () => {
 		assert.deepEqual(error.message.split("\n"), [
 			"the call does not fit the tau:",
 			"  site: is given a list of paths, which only an `in` that may be a directory takes",
-			'  rules: {"path":"x"} is neither a path, a list of paths, nor an archive\'s file, {mode, base, kind}',
+			'  rules: {"path":"x"} is neither a path, a list of paths, a file with its mode, {mode, path, kind}, nor an archive\'s file, {mode, base, kind}',
 			"  report: 7 is not a path",
 			"  args.edits.0: must have required property 'new'",
 			"  args.edits.1: must NOT have additional properties: why",
@@ -173,23 +173,89 @@ test("an `in` given a list of paths is a directory holding each under its base n
 	assert.throws(() => tau.bind({ files: { ...call.files, pages: ["a", ""] } }, caller), /pages: "" is not a path/);
 });
 
-test("an arg's placeholders name only files and the tau's own directory, at any depth, and the rest stays", () => {
+test("an arg's placeholders name only files and the tau's own directory, at any depth, each `$` before one escapes it once, and the rest stays", () => {
 	const tau = tauOf("argsplaceholders", {
 		files: { site: { kind: "dir", mode: "inout", description: "The site." } },
 		args: { type: "object" },
 	});
 	const args = {
 		start: "${site}/index.html",
-		nested: [{ deep: "from ${self}/guide.md, not $${site}, ${other}, $${other}, $1 or ${site" }, 3, true, null],
+		nested: [{ deep: "from ${self}/guide.md, not $${site}, ${other}, $${other}, $$${site}, $1 or ${site" }, 3, true, null],
 		"${site}": "keys stay",
 	};
 	const run = tau.bind({ files: { site: "s" }, args }, caller, () => "/work/s", "/tau");
 	assert.deepEqual(run.args, {
 		start: "/work/s/index.html",
-		nested: [{ deep: "from /tau/guide.md, not ${site}, ${other}, $${other}, $1 or ${site" }, 3, true, null],
+		nested: [{ deep: "from /tau/guide.md, not ${site}, ${other}, ${other}, $${site}, $1 or ${site" }, 3, true, null],
 		"${site}": "keys stay",
 	});
 	assert.throws(() => tau.bind({ files: { site: "s" }, args: { self: "x" } }, caller), /args\.self: names the tau's own directory, which no arg does/);
+});
+
+test("a call may give extra files, each with its mode, which the args name, and a declared file with its mode too", () => {
+	const tau = tauOf(
+		"extras",
+		{
+			files: { site: { kind: "dir", mode: "inout", description: "The site." } },
+			args: { type: "object", properties: { call: { type: "object" } } },
+		},
+		"Edit ${site}, then make ${call}.",
+	);
+	const call = {
+		files: {
+			notes: { mode: "in", path: "notes.md" },
+			site: { mode: "inout", path: "s", kind: "dir" },
+			drafts: { mode: "in", path: ["a.md", "b.md"] },
+			best: { mode: "out", kind: "file", path: "out/best.md" },
+		},
+		args: { call: { files: { notes: "${notes}", best: "${best}" }, args: { start: "$${notes}", deeper: "$$${notes}" } } },
+	};
+	const asked: string[] = [];
+	const run = tau.bind(call, caller, ({ name, base }) => {
+		asked.push(name);
+		return `/work/${base}`;
+	});
+	// Declared files first, in tau.json's order, then extra files, in the call's.
+	assert.deepEqual(asked, ["site", "notes", "drafts", "best"]);
+	assert.deepEqual(run.files, [
+		{ name: "site", mode: "inout", kind: "dir", base: "s", host: "/home/u/s", view: "/work/s" },
+		{ name: "notes", mode: "in", base: "notes.md", host: "/home/u/notes.md", view: "/work/notes.md" },
+		{ name: "drafts", mode: "in", kind: "dir", base: "drafts", host: ["/home/u/a.md", "/home/u/b.md"], view: "/work/drafts" },
+		{ name: "best", mode: "out", kind: "file", base: "best.md", host: "/home/u/out/best.md", view: "/work/best.md" },
+	]);
+	const passed = { files: { notes: "/work/notes.md", best: "/work/best.md" }, args: { start: "${notes}", deeper: "$${notes}" } };
+	assert.deepEqual(run.args, { call: passed });
+	assert.equal(run.prompt, `Edit /work/s, then make ${JSON.stringify(passed)}.`);
+
+	// An archive's call names an extra file's content, as it does a declared one's.
+	const archived = tau.bind({ files: { site: { mode: "inout", kind: "dir", base: "s" }, notes: { mode: "in", kind: "file", base: "notes.md" } } }, caller, ({ base }) => `/work/${base}`);
+	assert.deepEqual(archived.files[1], { name: "notes", mode: "in", kind: "file", base: "notes.md", view: "/work/notes.md" });
+
+	const files = {
+		site: { mode: "in", path: "s" },
+		x: "x.md",
+		y: { path: "y.md" },
+		z: { mode: "out", path: ["a", "b"] },
+		call: { mode: "in", path: "c" },
+		self: { mode: "in", path: "s" },
+		"no-name": { mode: "in", path: "n" },
+		taken: { mode: "in", path: "t" },
+	};
+	assert.throws(() => tau.bind({ files, args: { taken: 1 } }, caller), (error: Error) => {
+		assert.deepEqual(error.message.split("\n"), [
+			"the call does not fit the tau:",
+			"  site: is an `in` in the call, and an `inout` in the tau",
+			'  x: is no file the tau declares, so the call gives its mode, as {"mode": "in", "path": "x.md"}',
+			'  y: {"path":"y.md"} is neither a path, a list of paths, a file with its mode, {mode, path, kind}, nor an archive\'s file, {mode, base, kind}',
+			"  z: is given a list of paths, which only an `in` that may be a directory takes",
+			"  call: is an arg's name, which no file has",
+			"  self: names the tau's own directory, which no file does",
+			"  no-name: is not a file's name, which matches ^[A-Za-z_][A-Za-z0-9_]*$",
+			"  taken: is an arg's name, which no file has",
+		]);
+		return true;
+	});
+	assert.throws(() => tau.bind({ files: { site: { mode: "inout", kind: "file", path: "s" } } }, caller), /site: holds a file, where a directory goes/);
 });
 
 test("a tau without tau.json takes no files and no args", () => {
@@ -199,7 +265,7 @@ test("a tau without tau.json takes no files and no args", () => {
 	assert.deepEqual(tau.bind({}, caller), expected);
 	assert.deepEqual(tau.bind({ files: {}, args: {} }, caller), expected);
 	assert.throws(() => tau.bind({ args: { x: "1" } }, caller), /the tau takes no args, but is given x/);
-	assert.throws(() => tau.bind({ files: { x: "1" } }, caller), /the tau has no file named x/);
+	assert.throws(() => tau.bind({ files: { x: "1" } }, caller), /x: is no file the tau declares, so the call gives its mode/);
 	assert.throws(() => loadTau(tmp), /not a tau \(no PROMPT\.md\)/);
 });
 
@@ -328,7 +394,7 @@ test("an archive's call names each file's content, whose mode and kind fit the t
 			"the call does not fit the tau:",
 			"  site: is an `in` in the call, and an `inout` in the tau",
 			"  rules: holds a directory, where a file goes",
-			'  report: {"mode":"out","base":"r","kind":"file"} is neither a path, a list of paths, nor an archive\'s file, {mode, base, kind}',
+			'  report: {"mode":"out","base":"r","kind":"file"} is neither a path, a list of paths, a file with its mode, {mode, path, kind}, nor an archive\'s file, {mode, base, kind}',
 		]);
 		return true;
 	});
