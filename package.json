@@ -18,7 +18,8 @@
     "dist",
     "!dist/**/*.test.*",
     "TAU.md",
-    "docs/spec"
+    "docs/spec",
+    "docs/VOCAB.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -32,6 +33,7 @@
   "packageManager": "pnpm@10.33.2",
   "dependencies": {
     "@types/node": "^24.0.0",
+    "ajv": "^8.20.0",
     "typescript": "6.0.3"
   }
 }

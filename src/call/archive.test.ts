@@ -4,7 +4,7 @@ import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { ArchiveError, type CallJson, extractBlob, readCall, readResult, writeCall } from "./archive.js";
+import { ArchiveError, type CallJson, extractContent, readCall, readResult, writeCall } from "./archive.js";
 import { type WriteEntry, writeTar } from "./tar.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-archive-"));
@@ -33,19 +33,23 @@ function tree(dir: string, at = ""): string[] {
 }
 
 const CALL: CallJson = {
-	values: {
-		notes: { $in: { name: "notes.txt", kind: "file", blob: "b0" } },
-		top: "10",
-		site: { $inout: { name: "site", kind: "dir", blob: "b1" } },
-		counts: { $out: { name: "counts.txt" } },
+	files: {
+		notes: { mode: "in", kind: "file", base: "notes.txt" },
+		site: { mode: "inout", kind: "dir", base: "site" },
+		pages: { mode: "in", kind: "dir", base: "pages" },
+		counts: { mode: "out", base: "counts.txt" },
 	},
+	args: { top: 10, label: "${site}" },
+	tau: true,
 };
 
-test("a call's files and directories are written into it, and made again from it as they were", async () => {
+test("a call's tau, files and directories are written into it, and made again from it as they were", async () => {
 	const home = path.join(tmp, "home");
 	mkdirSync(path.join(home, "site", "assets"), { recursive: true });
 	writeFileSync(path.join(home, "notes.txt"), "notes\n");
+	chmodSync(path.join(home, "notes.txt"), 0o644);
 	writeFileSync(path.join(home, "site", "index.html"), "<p>hi</p>\n");
+	chmodSync(path.join(home, "site", "index.html"), 0o644);
 	writeFileSync(path.join(home, "site", "assets", "logo.png"), "png");
 	chmodSync(path.join(home, "site", "assets", "logo.png"), 0o600);
 	writeFileSync(path.join(home, "site", "run.sh"), "#!/bin/sh\n");
@@ -54,19 +58,32 @@ test("a call's files and directories are written into it, and made again from it
 	mkdirSync(path.join(home, "site", "locked"));
 	writeFileSync(path.join(home, "site", "locked", "kept"), "kept\n");
 	chmodSync(path.join(home, "site", "locked"), 0o555);
+	const tau = path.join(tmp, "tau");
+	mkdirSync(tau);
+	writeFileSync(path.join(tau, "PROMPT.md"), "Go.\n");
 
-	const bytes = await bytesOf(writeCall(CALL, [{ id: "b0", path: path.join(home, "notes.txt") }, { id: "b1", path: path.join(home, "site") }]));
-	const { json, blobs } = await readCall(once(bytes));
+	const sources = [
+		{ from: tau },
+		{ file: "notes", from: path.join(home, "notes.txt") },
+		{ file: "site", from: path.join(home, "site") },
+		// Several paths, a directory holding each under its base name.
+		{ file: "pages", from: [path.join(home, "site", "index.html"), path.join(home, "notes.txt")] },
+	];
+	const bytes = await bytesOf(writeCall(CALL, sources));
+	const { json, contents } = await readCall(once(bytes));
 	assert.deepEqual(json, CALL);
 	const out = path.join(tmp, "out");
 	mkdirSync(out);
-	const ids: string[] = [];
-	for await (const blob of blobs) {
-		ids.push(`${blob.id} ${blob.kind}`);
-		await extractBlob(blob, path.join(out, blob.id === "b0" ? "notes.txt" : "site"));
+	const read: string[] = [];
+	for await (const content of contents) {
+		read.push(`${content.file ?? "the tau"} ${content.kind}`);
+		await extractContent(content, path.join(out, content.file === undefined ? "tau" : content.file === "notes" ? "notes.txt" : content.file));
 	}
-	assert.deepEqual(ids, ["b0 file", "b1 dir"]);
-	assert.deepEqual(tree(out), tree(home));
+	assert.deepEqual(read, ["the tau dir", "notes file", "site dir", "pages dir"]);
+	assert.deepEqual(tree(path.join(out, "tau")), tree(tau));
+	assert.deepEqual(tree(path.join(out, "site")), tree(path.join(home, "site")));
+	assert.deepEqual(tree(path.join(out, "notes.txt")), tree(path.join(home, "notes.txt")));
+	assert.deepEqual(tree(path.join(out, "pages")), ["/ 755", "index.html 644 <p>hi</p>\n", "notes.txt 644 notes\n"]);
 });
 
 /** A call's JSON, and then `entries`, each a file's text, a directory, `/` at its end, or a symlink, `-> target`. */
@@ -81,15 +98,15 @@ async function call(json: object, entries: [string, string][], first = "call.jso
 	return bytesOf(writeTar(written));
 }
 
-/** Read a call whole, its blobs and their entries. */
+/** Read a call whole, its contents and their entries. */
 async function readWhole(bytes: Buffer): Promise<void> {
-	const { blobs } = await readCall(once(bytes));
-	for await (const blob of blobs) for await (const _ of blob.entries);
+	const { contents } = await readCall(once(bytes));
+	for await (const content of contents) for await (const _ of content.entries);
 }
 
-const DIR: CallJson = { values: { site: { $inout: { name: "site", kind: "dir", blob: "b1" } } } };
+const DIR: CallJson = { files: { site: { mode: "inout", kind: "dir", base: "site" } }, args: {} };
 
-test("a call that breaks the spec is refused, naming why, its blobs as they are read", async () => {
+test("a call that breaks the spec is refused, naming why, its contents as they are read", async () => {
 	const refused = async (bytes: Promise<Buffer>, problem: string) =>
 		assert.rejects(readWhole(await bytes), (error: Error) => {
 			assert.ok(error instanceof ArchiveError);
@@ -97,83 +114,90 @@ test("a call that breaks the spec is refused, naming why, its blobs as they are 
 			return true;
 		});
 	await refused(call(DIR, [], "result.json"), "its first entry is not the file call.json");
-	await refused(call({ values: {}, extra: 1 }, []), 'call.json: it: unknown key "extra"');
-	await refused(call({ values: { a: { $in: "a.txt" } } }, []), "call.json: `values`/a/$in: is an object");
-	await refused(call({ values: { a: { $in: { name: "../x", kind: "file", blob: "b" } } } }, []), "call.json: `values`/a/$in: `name` is a base name, not empty, `.` or `..`, with no / and no NUL");
-	await refused(call({ values: { a: { $out: { name: "x", kind: "file" } } } }, []), 'call.json: `values`/a/$out: unknown key "kind"');
-	await refused(call({ values: { a: { $in: { name: "a", kind: "file", blob: "b" }, b: "x" } } }, []), "call.json: `values`/a: is not a handle, {\"$in\" | \"$inout\": {name, kind, blob}} or {\"$out\": {name}}");
-	await refused(call({ values: {}, tau: { kind: "file", blob: "t" } }, [["blobs/t", "x"]]), "call.json: `tau` is a directory");
-	await refused(call(DIR, []), "the blob b1 is named, but not in it");
-	await refused(call(DIR, [["blobs/b1", "/"], ["blobs/b2", "x"]]), "no handle names the blob b2");
-	await refused(call(DIR, [["blobs/b1", "x"]]), "the blob b1 is a file, but is named as a directory");
-	await refused(call(DIR, [["blobs/b1", "-> b0"]]), "the blob b1 is a symlink, which a blob is not");
-	await refused(call(DIR, [["blobs/b1", "/"], ["blobs/b1", "/"]]), "the blob b1 appears twice");
-	await refused(call(DIR, [["blobs/b1/a", "x"]]), "blobs/b1/a is not in the blob before it, whose entries are together");
-	await refused(call(DIR, [["blobs/b1", "/"], ["blobs/b1/a/b", "x"]]), "blobs/b1/a/b does not follow its directory");
-	await refused(call(DIR, [["blobs/b1", "/"], ["blobs/b1/a", "x"], ["blobs/b1/a", "y"]]), "blobs/b1/a appears twice");
-	await refused(call(DIR, [["other", "x"]]), "other is not in a blob, under blobs/<id>");
+	await refused(call({ files: {}, args: {}, extra: 1 }, []), 'call.json: it: unknown key "extra"');
+	await refused(call({ files: {} }, []), "call.json: `args`: is an object");
+	await refused(call({ args: {} }, []), "call.json: `files`: is an object");
+	await refused(call({ files: { a: "a.txt" }, args: {} }, []), "call.json: `files`.a: is an object");
+	await refused(call({ files: { "a-b": { mode: "in", kind: "file", base: "a" } }, args: {} }, []), 'call.json: `files`: "a-b" is not a file\'s name, which matches ^[A-Za-z_][A-Za-z0-9_]*$');
+	await refused(call({ files: { a: { mode: "in", kind: "file", base: "../x" } }, args: {} }, []), "call.json: `files`.a: `base` is a base name, not empty, `.` or `..`, with no / and no NUL");
+	await refused(call({ files: { a: { mode: "share", kind: "file", base: "a" } }, args: {} }, []), 'call.json: `files`.a: `mode` is "in", "out" or "inout"');
+	await refused(call({ files: { a: { mode: "in", base: "a" } }, args: {} }, []), 'call.json: `files`.a: `kind` is "file" or "dir"');
+	await refused(call({ files: { a: { mode: "out", kind: "file", base: "x" } }, args: {} }, []), "call.json: `files`.a: an `out` has no `kind`, since it has no content");
+	await refused(call({ files: {}, args: {}, tau: { kind: "dir" } }, []), "call.json: `tau` is true, when the call carries its tau");
+	await refused(call({ files: {}, args: {}, tau: true }, [["tau", "x"]]), "tau is a file, but call.json says it is a directory");
+	await refused(call(DIR, []), "call.json names files/site, but the archive does not hold it");
+	await refused(call(DIR, [["files/site", "/"], ["files/other", "x"]]), "call.json names no content files/other");
+	await refused(call(DIR, [["tau", "/"]]), "call.json names no content tau");
+	await refused(call(DIR, [["files/site", "x"]]), "files/site is a file, but call.json says it is a directory");
+	await refused(call(DIR, [["files/site", "-> b0"]]), "files/site is a symlink, which a content is not");
+	await refused(call(DIR, [["files/site", "/"], ["files/site", "/"]]), "the content files/site appears twice");
+	await refused(call(DIR, [["files/site/a", "x"]]), "files/site/a is not in the content before it, whose entries are together");
+	await refused(call(DIR, [["files/site", "/"], ["files/site/a/b", "x"]]), "files/site/a/b does not follow its directory");
+	await refused(call(DIR, [["files/site", "/"], ["files/site/a", "x"], ["files/site/a", "y"]]), "files/site/a appears twice");
+	await refused(call(DIR, [["other", "x"]]), "other is in no content, which is at tau/ or files/<name>");
+	await refused(call(DIR, [["files/a-b", "x"]]), "files/a-b is in no content, which is at tau/ or files/<name>");
 	await refused(
 		call(DIR, [
-			["blobs/b1", "/"],
-			["blobs/b1/sub", "/"],
-			["blobs/b1/a", "x"],
-			["blobs/b1/abs", "-> /etc/passwd"],
-			["blobs/b1/up", "-> ../b0"],
-			["blobs/b1/sub/up", "-> ../../x"],
-			["blobs/b1/gone", "-> nowhere"],
-			["blobs/b1/loop", "-> loop"],
-			["blobs/b1/into", "-> a/b"],
-			["blobs/b1/via", "-> abs"],
+			["files/site", "/"],
+			["files/site/sub", "/"],
+			["files/site/a", "x"],
+			["files/site/abs", "-> /etc/passwd"],
+			["files/site/up", "-> ../b0"],
+			["files/site/sub/up", "-> ../../x"],
+			["files/site/gone", "-> nowhere"],
+			["files/site/loop", "-> loop"],
+			["files/site/into", "-> a/b"],
+			["files/site/via", "-> abs"],
 		]),
 		[
-			"blobs/b1/abs: leads to the absolute path /etc/passwd; a symlink in a blob is relative",
-			"blobs/b1/up: leads outside its blob",
-			"blobs/b1/sub/up: leads outside its blob",
-			"blobs/b1/gone: leads to blobs/b1/nowhere, which does not exist",
-			"blobs/b1/loop: is a loop of symlinks",
-			"blobs/b1/into: leads into blobs/b1/a, which is a file",
-			"blobs/b1/via: leads through blobs/b1/abs to the absolute path /etc/passwd; a symlink in a blob is relative",
+			"files/site/abs: leads to the absolute path /etc/passwd; a symlink in a content is relative",
+			"files/site/up: leads outside its content",
+			"files/site/sub/up: leads outside its content",
+			"files/site/gone: leads to files/site/nowhere, which does not exist",
+			"files/site/loop: is a loop of symlinks",
+			"files/site/into: leads into files/site/a, which is a file",
+			"files/site/via: leads through files/site/abs to the absolute path /etc/passwd; a symlink in a content is relative",
 		].join("; "),
 	);
-	// Links that stay in the blob, through others, and into directories, are its.
+	// Links that stay in the content, through others, and into directories, are its.
 	await readWhole(
 		await call(DIR, [
-			["blobs/b1", "/"],
-			["blobs/b1/sub", "/"],
-			["blobs/b1/sub/a", "x"],
-			["blobs/b1/here", "-> ."],
-			["blobs/b1/to", "-> sub"],
-			["blobs/b1/chain", "-> to/../to/a"],
-			["blobs/b1/sub/back", "-> ../chain"],
+			["files/site", "/"],
+			["files/site/sub", "/"],
+			["files/site/sub/a", "x"],
+			["files/site/here", "-> ."],
+			["files/site/to", "-> sub"],
+			["files/site/chain", "-> to/../to/a"],
+			["files/site/sub/back", "-> ../chain"],
 		]),
 	);
 });
 
-test("a reader that stops reading a blob early still has the next one, and the archive checked whole", async () => {
-	const json: CallJson = { values: { a: { $in: { name: "a", kind: "dir", blob: "b1" } }, b: { $in: { name: "b", kind: "file", blob: "b2" } } } };
+test("a reader that stops reading a content early still has the next one, and the archive checked whole", async () => {
+	const json: CallJson = { files: { a: { mode: "in", kind: "dir", base: "a" }, b: { mode: "in", kind: "file", base: "b" } }, args: {} };
 	const read = async (entries: [string, string][]) => {
-		const { blobs } = await readCall(once(await call(json, entries)));
-		const ids: string[] = [];
-		for await (const blob of blobs) {
-			ids.push(blob.id);
-			for await (const _ of blob.entries) break;
+		const { contents } = await readCall(once(await call(json, entries)));
+		const files: string[] = [];
+		for await (const content of contents) {
+			files.push(content.file as string);
+			for await (const _ of content.entries) break;
 		}
-		return ids;
+		return files;
 	};
-	assert.deepEqual(await read([["blobs/b1", "/"], ["blobs/b1/x", "x"], ["blobs/b2", "y"]]), ["b1", "b2"]);
-	await assert.rejects(read([["blobs/b1", "/"], ["blobs/b1/x", "-> /x"], ["blobs/b2", "y"]]), /blobs\/b1\/x: leads to the absolute path/u);
+	assert.deepEqual(await read([["files/a", "/"], ["files/a/x", "x"], ["files/b", "y"]]), ["a", "b"]);
+	await assert.rejects(read([["files/a", "/"], ["files/a/x", "-> /x"], ["files/b", "y"]]), /files\/a\/x: leads to the absolute path/u);
 });
 
 test("a result's JSON is checked as the spec has it", async () => {
 	const result = (json: object, entries: [string, string][] = []) => call(json, entries, "result.json");
-	const ok = { ok: true, text: "Done.", outputs: { "/site": { $inout: { name: "site", kind: "dir", blob: "o0" } } } };
-	const { json, blobs } = await readResult(once(await result(ok, [["blobs/o0", "/"]])));
+	const ok = { ok: true, text: "Done.", outputs: { site: { kind: "dir" } } };
+	const { json, contents } = await readResult(once(await result(ok, [["files/site", "/"]])));
 	assert.deepEqual(json, ok);
-	for await (const _ of blobs);
+	for await (const _ of contents);
 	const refused = async (bytes: Promise<Buffer>, problem: string) =>
 		assert.rejects(async () => {
-			const { blobs } = await readResult(once(await bytes));
-			for await (const _ of blobs);
+			const { contents } = await readResult(once(await bytes));
+			for await (const _ of contents);
 		}, (error: Error) => {
 			assert.equal(error.message, `the result breaks the spec: ${problem}`);
 			return true;
@@ -181,7 +205,7 @@ test("a result's JSON is checked as the spec has it", async () => {
 	await refused(result({ ok: true, text: "", failure: "no", outputs: {} }), "result.json: `failure` is a string, only when the run failed");
 	await refused(result({ ok: "yes", text: "", outputs: {} }), "result.json: `ok` is true or false");
 	await refused(result({ ok: false, text: "" }), "result.json: `outputs`: is an object");
-	await refused(result({ ok: true, text: "", outputs: { site: {} } }), 'result.json: `outputs`: "site" is not a JSON Pointer into the values');
-	await refused(result({ ok: true, text: "", outputs: { "/a~1b": {} } }), 'result.json: `outputs`: "/a~1b" is not a JSON Pointer into the values');
-	await refused(result({ ok: true, text: "", outputs: { "/a": { $in: { name: "a", kind: "file", blob: "o" } } } }), 'result.json: /a: unknown key "$in"');
+	await refused(result({ ok: true, text: "", outputs: { "/site": {} } }), 'result.json: `outputs`: "/site" is not a file\'s name, which matches ^[A-Za-z_][A-Za-z0-9_]*$');
+	await refused(result({ ok: true, text: "", outputs: { a: { kind: "file", mode: "out" } } }), 'result.json: `outputs`.a: unknown key "mode"');
+	await refused(result({ ok: true, text: "", outputs: { a: { kind: "file" } } }, [["tau", "/"]]), "result.json names no content tau");
 });

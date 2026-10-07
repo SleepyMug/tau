@@ -1,23 +1,27 @@
 # The tau API
 
-The **tau API** lets the agent's programs read the run's values, and run other taus, and names the
-exit codes of the tau's init (see [Init](init.md)). A tau that
-uses it declares it as any API, in `api/tau/index.d.ts` (see [APIs](apis.md)), as below or less of
-it, and a runtime that implements it gives its implementation (see
-[Implementations](implementations.md)):
+The **tau API** lets the agent's programs read the run's files and args, and run other taus, and
+names the exit codes of the tau's init (see [Init](init.md)). A tau that uses it declares it as any
+API, in `api/tau/index.d.ts` (see [APIs](apis.md)), as below or less of it, and a runtime that
+implements it gives its implementation (see [Implementations](implementations.md)):
 
 ```ts
 /**
- * The values of this run, and runs of other taus.
+ * This run's files and args, and runs of other taus.
  *
  * @packageDocumentation
  */
 
-/** A value a run takes (docs/spec/values.md). */
-export type Value = string | Handle | readonly Value[] | { readonly [name: string]: Value };
+/** A JSON value. */
+export type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json };
 
-/** A file or a directory, with what the agent does with it. */
-export type Handle = { readonly $in: string } | { readonly $out: string } | { readonly $inout: string };
+/** A call of a tau (docs/spec/calls.md): a path for each of its files, and its args. */
+export interface Call {
+	/** A path for each file, by name, or, for an `in` file, a list of paths. */
+	readonly files?: { readonly [name: string]: string | readonly string[] };
+	/** The args, which fit the tau's schema. */
+	readonly args?: { readonly [name: string]: Json };
+}
 
 /** How a run ended. */
 export interface Result {
@@ -29,20 +33,19 @@ export interface Result {
 	readonly failure?: string;
 }
 
-/** This run's values, by parameter, each handle's path where this agent sees it. */
-export declare function values(): { readonly [name: string]: Value };
+/** Where this agent sees each of this run's files, by name. */
+export declare function files(): { readonly [name: string]: string };
+
+/** This run's args, each `${name}` naming a file, and `${self}`, expanded. */
+export declare function args(): { readonly [name: string]: Json };
 
 /**
- * Run the tau at `agent`, a directory, with `values`, by parameter. `agent` and the paths of the
- * handles may be relative to `process.cwd()`. Resolves once the run ends; aborting `signal` stops
- * it, and the run fails.
- * @throws when the run cannot start, such as when `agent` is not a tau, or the values do not fit it.
+ * Run the tau at `agent`, a directory, with `call`. `agent` and the paths of the call's files may
+ * be relative to `process.cwd()`. Resolves once the run ends; aborting `signal` stops it, and the
+ * run fails.
+ * @throws when the run cannot start, such as when `agent` is not a tau, or the call does not fit it.
  */
-export declare function run(
-	agent: string,
-	values: { readonly [name: string]: Value },
-	signal?: AbortSignal,
-): Promise<Result>;
+export declare function run(agent: string, call: Call, signal?: AbortSignal): Promise<Result>;
 
 /** Init's exit code when it did the run: the agent does not run, and init's stdout is its text. */
 export declare const TAU_SKIP: 0;
@@ -54,6 +57,7 @@ export declare const TAU_RUN: 100;
 export declare const TAU_FALLBACK: 101;
 ```
 
-The agent that calls `run` is the new run's caller: the paths it gives are in its view, and the
-run may change only those its `$out` and `$inout` handles name. Runs share nothing but the
-caller's files and the APIs, so an agent can make several at once.
+The agent that calls `run` is the new run's caller: the paths it gives are in its view, such as
+the places `files()` gives, and the run may change only those it gives for `out` and `inout`
+files. Runs share nothing but the caller's files and the APIs, so an agent can make several at
+once.

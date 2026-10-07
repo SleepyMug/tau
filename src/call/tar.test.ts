@@ -32,14 +32,14 @@ const file = (name: string, text: string, mode = 0o644): WriteEntry => ({
 	body: async function* () { yield Buffer.from(text); },
 });
 
-const LONG = `blobs/b0/${"deep/".repeat(30)}név.md`;
+const LONG = `files/a/${"deep/".repeat(30)}név.md`;
 const ENTRIES: WriteEntry[] = [
 	file("call.json", "{}\n"),
-	{ name: "blobs/b0", type: "dir", mode: 0o755, size: 0 },
-	file("blobs/b0/run.sh", "#!/bin/sh\n", 0o750),
-	{ name: "blobs/b0/latest", type: "symlink", mode: 0o777, size: 0, target: "run.sh" },
+	{ name: "files/a", type: "dir", mode: 0o755, size: 0 },
+	file("files/a/run.sh", "#!/bin/sh\n", 0o750),
+	{ name: "files/a/latest", type: "symlink", mode: 0o777, size: 0, target: "run.sh" },
 	file(LONG, "x".repeat(1000)),
-	{ name: "blobs/b0/far", type: "symlink", mode: 0o777, size: 0, target: `${"../".repeat(40)}x` },
+	{ name: "files/a/far", type: "symlink", mode: 0o777, size: 0, target: `${"../".repeat(40)}x` },
 ];
 
 test("what is written is read back: names, types, modes, sizes, targets and bytes, long ones in pax headers", async () => {
@@ -47,11 +47,11 @@ test("what is written is read back: names, types, modes, sizes, targets and byte
 	assert.equal(bytes.length % 512, 0);
 	assert.deepEqual(await read(bytes), [
 		{ name: "call.json", type: "file", mode: 0o644, size: 3, text: "{}\n" },
-		{ name: "blobs/b0", type: "dir", mode: 0o755, size: 0 },
-		{ name: "blobs/b0/run.sh", type: "file", mode: 0o750, size: 10, text: "#!/bin/sh\n" },
-		{ name: "blobs/b0/latest", type: "symlink", mode: 0o777, size: 0, target: "run.sh" },
+		{ name: "files/a", type: "dir", mode: 0o755, size: 0 },
+		{ name: "files/a/run.sh", type: "file", mode: 0o750, size: 10, text: "#!/bin/sh\n" },
+		{ name: "files/a/latest", type: "symlink", mode: 0o777, size: 0, target: "run.sh" },
 		{ name: LONG, type: "file", mode: 0o644, size: 1000, text: "x".repeat(1000) },
-		{ name: "blobs/b0/far", type: "symlink", mode: 0o777, size: 0, target: `${"../".repeat(40)}x` },
+		{ name: "files/a/far", type: "symlink", mode: 0o777, size: 0, target: `${"../".repeat(40)}x` },
 	]);
 });
 
@@ -59,27 +59,27 @@ test("tar reads what is written, and what it writes in the pax format is read", 
 	const archive = path.join(tmp, "written.tar");
 	writeFileSync(archive, await bytesOf(writeTar(ENTRIES)));
 	const listed = execFileSync("tar", ["-tf", archive], { encoding: "utf8" }).trim().split("\n");
-	assert.deepEqual(listed, ["call.json", "blobs/b0/", "blobs/b0/run.sh", "blobs/b0/latest", LONG, "blobs/b0/far"]);
+	assert.deepEqual(listed, ["call.json", "files/a/", "files/a/run.sh", "files/a/latest", LONG, "files/a/far"]);
 
 	const dir = path.join(tmp, "by-tar");
-	mkdirSync(path.join(dir, "blobs/b1/sub"), { recursive: true });
+	mkdirSync(path.join(dir, "files/b/sub"), { recursive: true });
 	writeFileSync(path.join(dir, "result.json"), "{}");
-	writeFileSync(path.join(dir, "blobs/b1/sub", "ä".repeat(60)), "long\n");
-	symlinkSync(`sub/${"ä".repeat(60)}`, path.join(dir, "blobs/b1/link"));
+	writeFileSync(path.join(dir, "files/b/sub", "ä".repeat(60)), "long\n");
+	symlinkSync(`sub/${"ä".repeat(60)}`, path.join(dir, "files/b/link"));
 	// Padded to tar's record size, 10 KiB, with zeros.
-	const bytes = execFileSync("tar", ["--format=pax", "-cf", "-", "-C", dir, "result.json", "blobs"]);
+	const bytes = execFileSync("tar", ["--format=pax", "-cf", "-", "-C", dir, "result.json", "files"]);
 	assert.equal(bytes.length % 10240, 0);
 	const entries = (await read(bytes)) as { name: string; type: string; target?: string }[];
 	// tar lists a directory's entries in no set order.
 	assert.deepEqual(entries.map(({ name, type }) => `${name} ${type}`).sort(), [
-		"blobs dir",
-		"blobs/b1 dir",
-		"blobs/b1/link symlink",
-		"blobs/b1/sub dir",
-		`blobs/b1/sub/${"ä".repeat(60)} file`,
+		"files dir",
+		"files/b dir",
+		"files/b/link symlink",
+		"files/b/sub dir",
+		`files/b/sub/${"ä".repeat(60)} file`,
 		"result.json file",
 	]);
-	assert.equal(entries.find(({ name }) => name === "blobs/b1/link")?.target, `sub/${"ä".repeat(60)}`);
+	assert.equal(entries.find(({ name }) => name === "files/b/link")?.target, `sub/${"ä".repeat(60)}`);
 });
 
 /** `bytes` with its first header changed by `change`, its checksum made right again. */

@@ -1,26 +1,34 @@
 # Metadata
 
-`tau.json` declares what a tau takes from its caller, what its programs import, and its init.
-Without it, a tau takes no parameters, and its programs import every API.
+`tau.json` declares what a tau takes from its caller, its files and its args, what its programs
+import, and its init. Without it, a tau takes no files and no args, and its programs import every
+API.
 
 ```json
 {
   "description": "Replace text in every file of a directory, and report what changed.",
-  "params": {
-    "site": { "type": "dir", "mode": "inout", "description": "The files to edit." },
-    "edits": {
-      "type": "list",
-      "description": "The replacements, made in order.",
-      "of": {
-        "type": "record",
-        "fields": {
-          "old": { "type": "text", "description": "The text to replace." },
-          "new": { "type": "text", "description": "What replaces it." }
+  "files": {
+    "site": { "kind": "dir", "mode": "inout", "description": "The files to edit." },
+    "rules": { "kind": "file", "mode": "in", "description": "How to edit." },
+    "report": { "kind": "file", "mode": "out", "description": "What changed." }
+  },
+  "args": {
+    "type": "object",
+    "properties": {
+      "edits": {
+        "type": "array",
+        "description": "The replacements, made in order.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "old": { "type": "string", "description": "The text to replace." },
+            "new": { "type": "string", "description": "What replaces it." }
+          },
+          "required": ["old", "new"]
         }
       }
     },
-    "rules": { "type": "file", "mode": "in", "description": "How to edit." },
-    "report": { "type": "file", "mode": "out", "description": "What changed." }
+    "required": ["edits"]
   },
   "exposes": ["@api/file-edits"]
 }
@@ -29,27 +37,33 @@ Without it, a tau takes no parameters, and its programs import every API.
 Each key is optional, and any other is refused:
 - **`description`** says what the tau does, for whoever runs it. A runtime can show it as usage,
   or offer the tau to another agent as a tool.
-- **`params`** declares the parameters, from each one's name to its type, which has a
-  `description` of what it is. The caller gives a value for every one (see [Values](values.md)).
-  A name matches `^[A-Za-z_][A-Za-z0-9_]*$`, and is not `self`, which names the tau's own directory
-  (see [Prompt](prompt.md)).
+- **`files`** declares the tau's files, from each one's name to what it is (see
+  [Files](#files)). A call gives a path for every one (see [Calls](calls.md)).
+- **`args`** is the **schema** of the args (see [Args](#args)).
 - **`exposes`** names what the agent's programs import, each once: an API, as `@api/<name>` (see
   [APIs](apis.md)), or a package of the tau's own, by its name (see [Packages](packages.md)).
   Without it, they import every API.
 - **`init`** is a command, a string that is not blank, that a runtime runs before the agent, and
-  which may do the run without it; it names the tau's own directory as `${self}`, and nothing else
-  (see [Init](init.md)).
+  which may do the run without it (see [Init](init.md)).
 
-## Types
+A file's name, and an arg's that the schema declares, matches `^[A-Za-z_][A-Za-z0-9_]*$`, and is
+not `self`, which names the tau's own directory (see [Placeholders](placeholders.md)). No arg the
+schema declares has a file's name, so that a placeholder names one or the other.
 
-A type is an object with `type`, the keys that kind asks for, and `description`, optional but for
-a parameter's, and no other key. A value fits it as follows:
-- `{"type": "text"}`: a text.
-- `{"type": "file" | "dir" | "path", "mode": "in" | "out" | "inout"}`: a handle of that mode, to a
-  file, a directory, or either, as [Paths](paths.md) checks.
-- `{"type": "list", "of": <type>}`: a list, each of whose values fits `of`.
-- `{"type": "record", "fields": {<name>: <type>, …}}`: a closed record, with a value for each field,
-  which fits its type, and no other.
-- `{"type": "record"}`: an open record, with any names and any values.
+## Files
 
-A field's name matches the pattern a parameter's does.
+A file is an object with these keys, and no other:
+- `mode`: what the agent does with it, `in`, `out` or `inout` (see [Calls](calls.md)).
+- `kind`: optional, `file` or `dir`, what it is; without it, it may be either.
+- `description`: what it is, a string that is not blank.
+
+## Args
+
+`args` is a JSON Schema, draft 2020-12, of an object: its `type` is `"object"`, and a call's args
+fit it (see [Calls](calls.md)). It is the tau's whole schema: whatever `$ref` resolves, it finds in
+`args` itself, such as in its `$defs`, never by fetching. A schema that JSON Schema's meta-schema
+refuses, or that holds a keyword the draft does not define, is refused with the tau. A `format`
+says what a string is, and is not checked. The top-level `properties` declare the args the prompt
+may name (see [Placeholders](placeholders.md)), and their `description`s say what each is.
+
+Without `args`, a tau takes no args: a call's args are empty.

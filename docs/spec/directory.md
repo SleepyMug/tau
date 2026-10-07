@@ -3,7 +3,7 @@
 ```
 my-agent/
 ├── PROMPT.md            # required: the prompt (prompt.md)
-├── tau.json             # optional: what it takes and gives (metadata.md)
+├── tau.json             # optional: its files and args, and more (metadata.md)
 ├── skills/              # optional: skills, each a directory in it with a SKILL.md
 ├── api/                 # optional: the APIs, a directory each (apis.md)
 │   └── notes/
@@ -33,4 +33,4 @@ symlinks, all relative, to something that exists in the tau. Runtimes keep symli
 
 Anything else in the directory, such as the sources of its skills, or a tau it runs, is the
 author's: no runtime reads it, though the agent may, where `${self}` names the directory (see
-[Prompt](prompt.md)).
+[Placeholders](placeholders.md)).
