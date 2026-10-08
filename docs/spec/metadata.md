@@ -47,9 +47,8 @@ Each key is optional, and any other is refused:
 - **`init`** is a command, a string that is not blank, that a runtime runs before the agent, and
   which may do the run without it (see [Init](init.md)).
 
-A file's name, and an arg's that the schema declares, matches `^[A-Za-z_][A-Za-z0-9_]*$`, and is
-not `self`, which names the tau's own directory (see [Placeholders](placeholders.md)). No arg the
-schema declares has a file's name, so that a placeholder names one or the other.
+Files and the args the schema declares are named as a run's scope has it (see
+[Placeholders](placeholders.md)): a placeholder names each, and one name names one thing.
 
 ## Files
 

@@ -23,9 +23,8 @@ paths := path | [path, …]
   paths, and, optionally, its `kind`, `file` or `dir`; without one, it may be either. A declared
   file may be given so too, its `mode` the one `tau.json` declares, and its `kind`, if given, the
   declared one, or either when the tau declares none.
-- An extra file's name matches `^[A-Za-z_][A-Za-z0-9_]*$`, and is neither `self`, nor an arg's
-  that the schema declares in its top-level `properties` or that the call gives, so that a
-  placeholder names one or the other (see [Metadata](metadata.md)).
+- An extra file is named as any file is, in the run's scope, where no arg, declared or given,
+  has its name (see [Placeholders](placeholders.md)).
 - `args` are any JSON object that fits the schema (see [Metadata](metadata.md)). They hold no file:
   a string in them names one only with a placeholder (see [Placeholders](placeholders.md)).
 

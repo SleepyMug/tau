@@ -5,6 +5,14 @@ are in three places, the prompt, `PROMPT.md`, every string of the args, at any d
 names of an object's properties, and init, and a runtime **expands** each, replacing it, once for
 the run, after placing the files (see [Running](running.md)). Everywhere, the same rules hold.
 
+## Scope
+
+A run's **scope** is what its placeholders name, each by its first name: `self`, the files, extra
+files included (see [Calls](calls.md)), and the args, those the schema declares in its top-level
+`properties` (see [Metadata](metadata.md)) and those the call gives. A name names one thing: no
+file or arg is named `self`, and no file has an arg's name. A file's name, and an arg's that the
+schema declares, matches `^[A-Za-z_][A-Za-z0-9_]*$`.
+
 ## What a placeholder names
 
 - `${self}` becomes where the agent sees the tau's own directory, so that the tau can name what it
@@ -36,17 +44,13 @@ the prompt, is written with one `$` more.
 
 ## What each may name
 
-Any other `${` is refused:
-- in the prompt, when the tau is read: one that is not closed on its line, whose first name is
-  neither `self`, nor a file's that `tau.json` declares, nor an arg's that the schema declares in
-  its top-level `properties` (see [Metadata](metadata.md)), or that names what lies in `self` or
-  in a file. The prompt names no extra file, which the tau cannot know of: an arg does.
-- in the args, with the call: the same, but naming any file the call gives, and any arg the call
-  gives or the schema declares.
-- in init, when the tau is read: any that names more than `self` or a file `tau.json` declares.
-  Init names no arg, since an arg in a command would break its quoting, and could run commands of
-  the caller's choosing. It reads the args through the tau API (see [Init](init.md)). Each
-  placeholder in init becomes one word for `sh`, quoted if need be.
+Any other `${` is refused: one that is not closed on its line, whose first name is not in scope,
+or that names what lies in `self` or in a file. The args are checked with the call. The prompt
+and init are checked when the tau is read, in what `tau.json` declares: the prompt names no extra
+file, which the tau cannot know of, but an arg does; and init names no arg, since an arg in a
+command would break its quoting, and could run commands of the caller's choosing, but reads the
+args through the tau API (see [Init](init.md)). Each placeholder in init becomes one word for
+`sh`, quoted if need be.
 
 Nothing else is expanded: what a file holds is as it is.
 

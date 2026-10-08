@@ -109,10 +109,10 @@ test("a call must fit the tau, listing every problem", () => {
 		assert.deepEqual(error.message.split("\n"), [
 			"the call does not fit the tau:",
 			'  the call has no "more", only "files" and "args"',
+			"  args.site: is a file's name, which no arg has",
 			"  no path for report, guides",
 			"  rules: a path cannot be empty",
 			'  extra: is no file the tau declares, so the call gives its mode, as {"mode": "in", "path": "x"}',
-			"  args.site: is a file's name, which no arg has",
 			"  args: must have required property 'edits'",
 			"  args.opts.tone: must be string",
 		]);
@@ -270,14 +270,14 @@ test("a call may give extra files, each with its mode, which the args name, and 
 	assert.throws(() => tau.resolve({ files, args: { taken: 1 } }, cwd), (error: Error) => {
 		assert.deepEqual(error.message.split("\n"), [
 			"the call does not fit the tau:",
-			"  site: is an `in` in the call, and an `inout` in the tau",
-			'  x: is no file the tau declares, so the call gives its mode, as {"mode": "in", "path": "x.md"}',
-			'  y: {"path":"y.md"} is neither a path, a list of paths, nor a file with its mode, {mode, path, kind}',
-			"  z: is given a list of paths, which only an `in` that may be a directory takes",
 			"  call: is an arg's name, which no file has",
 			"  self: names the tau's own directory, which no file does",
 			"  no-name: is not a file's name, which matches ^[A-Za-z_][A-Za-z0-9_]*$",
 			"  taken: is an arg's name, which no file has",
+			"  site: is an `in` in the call, and an `inout` in the tau",
+			'  x: is no file the tau declares, so the call gives its mode, as {"mode": "in", "path": "x.md"}',
+			'  y: {"path":"y.md"} is neither a path, a list of paths, nor a file with its mode, {mode, path, kind}',
+			"  z: is given a list of paths, which only an `in` that may be a directory takes",
 		]);
 		return true;
 	});
@@ -434,11 +434,11 @@ test("a call an archive carries is checked against the tau, as one from a caller
 	assert.throws(() => tau.check({ files: wrong, args: { edits: 1, opts: { tone: "dry" } } }), (error: Error) => {
 		assert.deepEqual(error.message.split("\n"), [
 			"the call does not fit the tau:",
+			"  edits: is an arg's name, which no file has",
 			"  no path for guides",
 			"  site: is an `in` in the call, and an `inout` in the tau",
 			"  rules: holds a directory, where a file goes",
 			"  report: holds a directory, where a file goes",
-			"  edits: is an arg's name, which no file has",
 			"  args.edits: must be array",
 		]);
 		return true;

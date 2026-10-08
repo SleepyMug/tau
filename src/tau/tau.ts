@@ -116,6 +116,8 @@ const KINDS: readonly Kind[] = ["file", "dir"];
 const OPENING = /(\$+)\{/gu;
 /** What follows a placeholder's `${`: its names, and the `}` that closes it on its line. */
 const INSIDE = /([^}\n]*)(\}?)/uy;
+/** What a placeholder in the args names when the scope does not have its name. */
+const ARG_UNKNOWN = `neither \${${SELF}}, a file, nor an arg`;
 
 /**
  * The tau at `dir`: its PROMPT.md, and its tau.json if it has one (without it, the tau takes no
@@ -135,23 +137,17 @@ export function loadTau(dir: string): Tau {
 	const prompt = readFileSync(promptFile, "utf8");
 	let template: Template;
 	try {
-		template = parseTemplate(
-			prompt,
-			(inside) =>
-				placeholderProblem(
-					inside,
-					(name) => Object.hasOwn(files, name),
-					(name) => declaredArgs.has(name),
-					"an arg the schema declares in its properties",
-				),
-			(line) => `line ${line}`,
-		);
+		const scope = scopeOf(files, declaredArgs, {}, [], []);
+		const unknown = `neither \${${SELF}}, a file, nor an arg the schema declares in its properties`;
+		template = parseTemplate(prompt, (inside) => placeholderProblem(inside, scope, unknown), (line) => `line ${line}`);
 	} catch (error) {
 		throw new Error(`${promptFile}: ${messageOf(error)}`);
 	}
 	let command: Template | undefined;
 	try {
-		command = init === undefined ? undefined : parseTemplate(init, (inside) => initProblem(inside, files), () => "`init`");
+		const scope = scopeOf(files, new Set(), {}, [], []);
+		const unknown = `neither \${${SELF}} nor a file: init reads the args through the tau API`;
+		command = init === undefined ? undefined : parseTemplate(init, (inside) => placeholderProblem(inside, scope, unknown), () => "`init`");
 	} catch (error) {
 		throw new Error(`${metadataFile}: ${messageOf(error)}`);
 	}
@@ -169,67 +165,48 @@ export function loadTau(dir: string): Tau {
 		resolve(call, cwd) {
 			const problems: string[] = [];
 			const { files: given, args: givenArgs } = callParts(call, problems);
+			const scope = scopeOf(files, declaredArgs, givenArgs ?? {}, Object.keys(given ?? {}), problems);
 			const resolved: Record<string, CallFile> = {};
 			const paths: Record<string, string | readonly string[]> = {};
 			if (given !== undefined)
 				for (const name of fileNames(files, given, problems)) {
-					const problem = (text: string): void => void problems.push(`${name}: ${text}`);
-					if (!Object.hasOwn(files, name) && extraProblem(name, declaredArgs, givenArgs, problem)) continue;
-					const file = resolveFile(name, files[name], given[name], cwd, problem);
+					if (scope.get(name) !== "file") continue;
+					const file = resolveFile(name, files[name], given[name], cwd, (text) => void problems.push(`${name}: ${text}`));
 					if (file === undefined) continue;
 					resolved[name] = file.file;
 					paths[name] = file.paths;
 				}
-			if (givenArgs !== undefined)
-				problems.push(
-					...argsProblems(givenArgs, files, validate),
-					...argPlaceholderProblems(givenArgs, [...Object.keys(files), ...Object.keys(given ?? {})], declaredArgs),
-				);
-			if (problems.length > 0) throw new TypeError(`the call does not fit the tau:\n  ${problems.join("\n  ")}`);
+			refuseUnfit(givenArgs === undefined ? problems : [...problems, ...argsProblems(givenArgs, scope, validate)]);
 			return { files: resolved, paths, args: givenArgs ?? {} };
 		},
 		check(call) {
 			const problems: string[] = [];
+			const scope = scopeOf(files, declaredArgs, call.args, Object.keys(call.files), problems);
 			const checked: Record<string, CallFile> = {};
 			for (const name of fileNames(files, call.files, problems)) {
-				const problem = (text: string): void => void problems.push(`${name}: ${text}`);
+				if (scope.get(name) !== "file") continue;
 				const declared = files[name];
-				if (declared === undefined && extraProblem(name, declaredArgs, call.args, problem)) continue;
 				const { mode, kind, base } = call.files[name] as CallFile;
 				const misfit = fitProblem(declared, mode, kind);
 				if (misfit !== undefined) {
-					problem(misfit);
+					problems.push(`${name}: ${misfit}`);
 					continue;
 				}
 				const known = kind ?? declared?.kind;
 				checked[name] = { mode, ...(known === undefined ? {} : { kind: known }), base };
 			}
-			problems.push(
-				...argsProblems(call.args, files, validate),
-				...argPlaceholderProblems(call.args, [...Object.keys(files), ...Object.keys(call.files)], declaredArgs),
-			);
-			if (problems.length > 0) throw new TypeError(`the call does not fit the tau:\n  ${problems.join("\n  ")}`);
+			refuseUnfit([...problems, ...argsProblems(call.args, scope, validate)]);
 			return { files: checked, args: call.args };
 		},
 		expand(call, places, self = absolute) {
-			const placeOf = new Map<string, string>();
-			for (const name of Object.keys(call.files)) {
-				const place = places[name];
-				if (typeof place !== "string") throw new TypeError(`${name}: has no place`);
-				placeOf.set(name, place);
-			}
-			placeOf.set(SELF, self);
-			const { args: expandedArgs, problems } = expandArgs(call.args, placeOf, declaredArgs);
-			if (problems.length > 0) throw new TypeError(`the args do not expand:\n  ${problems.join("\n  ")}`);
+			for (const name of Object.keys(call.files)) if (typeof places[name] !== "string") throw new TypeError(`${name}: has no place`);
+			const placeOf = (name: string): string => (name === SELF ? self : (places[name] as string));
+			const run = expansion(call.args, scopeOf(files, declaredArgs, call.args, Object.keys(call.files), []), placeOf);
+			if (run.problems.length > 0) throw new TypeError(`the args do not expand:\n  ${run.problems.join("\n  ")}`);
 			return {
-				prompt: expand(template, (names) => {
-					const place = names.length === 1 ? placeOf.get(names[0] as string) : undefined;
-					if (place !== undefined) return place;
-					const found = lookup(expandedArgs, names);
-					return found === undefined ? "" : textOf(found);
-				}),
-				args: expandedArgs,
-				init: command === undefined ? undefined : expand(command, ([first = ""]) => shellWord(placeOf.get(first) as string)),
+				prompt: run.text(template),
+				args: run.args,
+				init: command === undefined ? undefined : expand(command, ([first = ""]) => shellWord(placeOf(first))),
 			};
 		},
 	};
@@ -258,16 +235,39 @@ function fileNames(declared: { readonly [name: string]: FileDeclaration }, given
 	return [...Object.keys(declared).filter((name) => Object.hasOwn(given, name)), ...Object.keys(given).filter((name) => !Object.hasOwn(declared, name))];
 }
 
+/** What a placeholder's first name names: the tau's own directory, a file, or an arg. */
+type Named = "self" | "file" | "arg";
+
+/** The names a run's placeholders start with, and what each names (docs/spec/placeholders.md). */
+type Scope = ReadonlyMap<string, Named>;
+
 /**
- * Whether an extra file's name is one no file can have: not a name, `self`, or an arg's, which the
- * schema declares, or the call gives; its problem recorded.
+ * The scope of a run: `self`, the files tau.json declares, the args, those the schema declares
+ * and those `args` gives, and the other files the call gives, `given`, its extra files, one name
+ * naming one thing. A given arg that `self` or a declared file names, and an extra file named as no
+ * file can be, or as an arg is, are problems, and out of the scope.
  */
-function extraProblem(name: string, declaredArgs: ReadonlySet<string>, args: object | undefined, problem: (text: string) => void): boolean {
-	if (!NAME.test(name)) problem(`is not a file's name, which matches ${NAME.source}`);
-	else if (name === SELF) problem("names the tau's own directory, which no file does");
-	else if (declaredArgs.has(name) || (args !== undefined && Object.hasOwn(args, name))) problem("is an arg's name, which no file has");
-	else return false;
-	return true;
+function scopeOf(
+	files: { readonly [name: string]: FileDeclaration },
+	declaredArgs: ReadonlySet<string>,
+	args: object,
+	given: readonly string[],
+	problems: string[],
+): Scope {
+	const scope = new Map<string, Named>([[SELF, "self"]]);
+	for (const name of Object.keys(files)) scope.set(name, "file");
+	for (const name of [...declaredArgs, ...Object.keys(args)]) {
+		const named = scope.get(name) ?? "arg";
+		if (named === "arg") scope.set(name, named);
+		else problems.push(named === "self" ? `args.${SELF}: names the tau's own directory, which no arg does` : `args.${name}: is a file's name, which no arg has`);
+	}
+	for (const name of given.filter((name) => !Object.hasOwn(files, name))) {
+		if (!NAME.test(name)) problems.push(`${name}: is not a file's name, which matches ${NAME.source}`);
+		else if (scope.get(name) === "self") problems.push(`${name}: names the tau's own directory, which no file does`);
+		else if (scope.get(name) === "arg") problems.push(`${name}: is an arg's name, which no file has`);
+		else scope.set(name, "file");
+	}
+	return scope;
 }
 
 /** Why a file of `mode` and `kind`, if given, does not fit what tau.json declares, if it declares it. */
@@ -278,17 +278,18 @@ function fitProblem(declared: FileDeclaration | undefined, mode: Mode, kind: Kin
 	return undefined;
 }
 
-/** The problems of `args`, which tau.json's schema checks, its names neither a file's nor `self`. */
-function argsProblems(args: { readonly [name: string]: Json }, files: { readonly [name: string]: FileDeclaration }, validate: ValidateFunction | undefined): string[] {
+/** The problems of `args`: what tau.json's schema finds, and what their placeholders name but cannot, in `scope`. */
+function argsProblems(args: { readonly [name: string]: Json }, scope: Scope, validate: ValidateFunction | undefined): string[] {
 	const problems: string[] = [];
-	for (const name of Object.keys(args)) {
-		if (Object.hasOwn(files, name)) problems.push(`args.${name}: is a file's name, which no arg has`);
-		else if (name === SELF) problems.push(`args.${SELF}: names the tau's own directory, which no arg does`);
-	}
 	if (validate === undefined) {
 		if (Object.keys(args).length > 0) problems.push(`the tau takes no args, but is given ${Object.keys(args).join(", ")}`);
 	} else if (!validate(args)) problems.push(...(validate.errors ?? []).map(schemaProblem));
-	return problems;
+	return [...problems, ...expansion(args, scope, () => "").problems];
+}
+
+/** Refuses a call with `problems`, listing each. */
+function refuseUnfit(problems: readonly string[]): void {
+	if (problems.length > 0) throw new TypeError(`the call does not fit the tau:\n  ${problems.join("\n  ")}`);
 }
 
 /**
@@ -356,29 +357,28 @@ function schemaProblem({ instancePath, message, keyword, params }: ErrorObject):
 type Step = string | number;
 
 /**
- * The args, each string's placeholders expanded (docs/spec/placeholders.md): `${self}` and
- * `${name}` naming a file become the place `places` gives, and `${name}` naming an arg, or
- * `${name.field}` what lies in one, the expansion of its value, a string as it is and anything
- * else as JSON, and nothing for what the args lack. Each placeholder `places` and the args do not
- * name, and each value that names itself, through as many others as it does, is a problem, and
- * expands to nothing.
+ * A run's placeholders expanded (docs/spec/placeholders.md), each naming what `scope` says: `self`
+ * and a file become `placeOf` it, and an arg, or `${name.field}` what lies in one, the expansion of
+ * its value, a string as it is and anything else as JSON, and nothing for what the args lack.
+ * `args` are the args expanded, each string, and `text` expands a template, the prompt; each
+ * placeholder in the args that names what `scope` does not, and each value that names itself,
+ * through as many others as it does, is one of `problems`, and expands to nothing.
  */
-function expandArgs(
+function expansion(
 	args: { readonly [name: string]: Json },
-	places: ReadonlyMap<string, string>,
-	declaredArgs: ReadonlySet<string>,
-): { args: { readonly [name: string]: Json }; problems: string[] } {
+	scope: Scope,
+	placeOf: (name: string) => string,
+): { args: { readonly [name: string]: Json }; text: (template: Template) => string; problems: string[] } {
 	const problems: string[] = [];
 	const done = new Map<string, string>();
 	const expanding: { key: string; at: string }[] = [];
-	const problemOf = (inside: string) =>
-		placeholderProblem(
-			inside,
-			(name) => places.has(name),
-			(name) => declaredArgs.has(name) || Object.hasOwn(args, name),
-			"an arg",
-		);
 	const where = (at: readonly Step[]): string => ["args", ...at].join(".");
+	const valueOf = (names: readonly string[]): string => {
+		const [first = ""] = names;
+		if (scope.get(first) !== "arg") return placeOf(first);
+		const found = lookup(args, names);
+		return found === undefined ? "" : textOf(value(found, names));
+	};
 	const value = (item: Json, at: readonly Step[]): Json => {
 		if (typeof item === "string") return string(item, at);
 		if (Array.isArray(item)) return item.map((entry, index) => value(entry, [...at, index]));
@@ -398,12 +398,7 @@ function expandArgs(
 		expanding.push({ key, at: where(at) });
 		let expanded = "";
 		try {
-			expanded = expand(parseTemplate(text, problemOf, () => where(at)), (names) => {
-				const place = names.length === 1 ? places.get(names[0] as string) : undefined;
-				if (place !== undefined) return place;
-				const found = lookup(args, names);
-				return found === undefined ? "" : textOf(value(found, names));
-			});
+			expanded = expand(parseTemplate(text, (inside) => placeholderProblem(inside, scope, ARG_UNKNOWN), () => where(at)), valueOf);
 		} catch (error) {
 			problems.push(messageOf(error));
 		}
@@ -411,12 +406,8 @@ function expandArgs(
 		done.set(key, expanded);
 		return expanded;
 	};
-	return { args: value(args, []) as { readonly [name: string]: Json }, problems };
-}
-
-/** The problems of the placeholders in `args`, given the files `names`, before any has a place. */
-function argPlaceholderProblems(args: { readonly [name: string]: Json }, names: Iterable<string>, declaredArgs: ReadonlySet<string>): string[] {
-	return expandArgs(args, new Map([SELF, ...names].map((name) => [name, ""])), declaredArgs).problems;
+	const expanded = value(args, []) as { readonly [name: string]: Json };
+	return { args: expanded, text: (template) => expand(template, valueOf), problems };
 }
 
 /** What `names` finds in the args: through as many objects as it lies in; undefined for what they lack. */
@@ -625,22 +616,16 @@ function parseTemplate(
 }
 
 /**
- * Why `${inside}` cannot be in a prompt, or in the args, if it cannot: it names `self`, a file, or
- * an arg, `isFile` and `isArg` say which, or what lies in an arg; `anArg` says which args it may name.
+ * Why `${inside}` cannot be a placeholder in `scope`, if it cannot: its first name is not in it,
+ * which `unknown` says, or it names what lies in `self` or a file.
  */
-function placeholderProblem(inside: string, isFile: (name: string) => boolean, isArg: (name: string) => boolean, anArg: string): string | undefined {
+function placeholderProblem(inside: string, scope: Scope, unknown: string): string | undefined {
 	const [first = "", ...rest] = inside.split(".");
-	if (inside.split(".").some((name) => name === "")) return "names nothing between its dots; write $\${ for a literal \${";
-	if (first === SELF || isFile(first))
-		return rest.length === 0 ? undefined : `names what lies in ${first === SELF ? "the tau's own directory" : `the file ${first}`}, which is a path`;
-	if (isArg(first)) return undefined;
-	return `names neither \${${SELF}}, a file, nor ${anArg}; write $\${ for a literal \${`;
-}
-
-/** Why `${inside}` cannot be in an init, if it cannot: it names neither `self` nor a file. */
-function initProblem(inside: string, files: { readonly [name: string]: FileDeclaration }): string | undefined {
-	if (inside === SELF || Object.hasOwn(files, inside)) return undefined;
-	return `names neither \${${SELF}} nor a file: init reads the args through the tau API; write $\${ for a literal \${`;
+	if ([first, ...rest].some((name) => name === "")) return "names nothing between its dots; write $\${ for a literal \${";
+	const named = scope.get(first);
+	if (named === undefined) return `names ${unknown}; write $\${ for a literal \${`;
+	if (named !== "arg" && rest.length > 0) return `names what lies in ${named === "self" ? "the tau's own directory" : `the file ${first}`}, which is a path`;
+	return undefined;
 }
 
 /** A path as one word for `sh`: as it is when nothing in it is special, else in single quotes. */
