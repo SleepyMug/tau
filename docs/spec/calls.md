@@ -72,9 +72,10 @@ APIs.
 ## Args
 
 The args are the caller's data. A runtime checks them against the schema, as JSON Schema does,
-before the run starts, and refuses a call whose args do not fit. Once the files are placed, it
-expands the args' placeholders (see [Placeholders](placeholders.md)), and that is how the agent
-sees them: in the prompt, and through the [tau API](tau-api.md).
+before the run starts, and their placeholders, and refuses a call whose args do not fit, or name
+what they cannot, or themselves (see [Placeholders](placeholders.md)). Once the files are placed,
+it expands the args' placeholders, and that is how the agent sees them: in the prompt, and through
+the [tau API](tau-api.md).
 
 ## Passing a call on
 

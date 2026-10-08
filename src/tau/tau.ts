@@ -63,7 +63,8 @@ export interface Tau {
 	 * The agent's side of a run: the args, the prompt and init of `call`, a call `resolve` or
 	 * `check` gave, their placeholders expanded (docs/spec/placeholders.md), with `places`, where
 	 * the agent sees each file, by name, and `self`, where it sees the tau's own directory, by
-	 * default `dir`. Throws TypeError for a file with no place.
+	 * default `dir`. Throws TypeError for a file with no place, or args whose placeholders do not
+	 * expand, which `resolve` and `check` refuse.
 	 */
 	expand(call: CheckedCall, places: { readonly [name: string]: string }, self?: string): Expanded;
 }
@@ -111,10 +112,10 @@ const PACKAGE = /^(?:@[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*
 const SELF = "self";
 const MODES: readonly Mode[] = ["in", "out", "inout"];
 const KINDS: readonly Kind[] = ["file", "dir"];
-/** In the prompt and init: `$${` is a literal `${`; any other `${` opens a placeholder. */
-const PLACEHOLDER = /\$\$\{|\$\{([^}\n]*)(\}?)/gu;
-/** In the args: `${name}`, after any `$`s, each of which escapes it once. */
-const ARG_PLACEHOLDER = /(\$*)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu;
+/** `$`s before a `{`: one opens a placeholder; more are text, with one `$` less. */
+const OPENING = /(\$+)\{/gu;
+/** What follows a placeholder's `${`: its names, and the `}` that closes it on its line. */
+const INSIDE = /([^}\n]*)(\}?)/uy;
 
 /**
  * The tau at `dir`: its PROMPT.md, and its tau.json if it has one (without it, the tau takes no
@@ -134,7 +135,17 @@ export function loadTau(dir: string): Tau {
 	const prompt = readFileSync(promptFile, "utf8");
 	let template: Template;
 	try {
-		template = parseTemplate(prompt, (inside) => placeholderProblem(inside, files, declaredArgs), (line) => `line ${line}`);
+		template = parseTemplate(
+			prompt,
+			(inside) =>
+				placeholderProblem(
+					inside,
+					(name) => Object.hasOwn(files, name),
+					(name) => declaredArgs.has(name),
+					"an arg the schema declares in its properties",
+				),
+			(line) => `line ${line}`,
+		);
 	} catch (error) {
 		throw new Error(`${promptFile}: ${messageOf(error)}`);
 	}
@@ -169,7 +180,11 @@ export function loadTau(dir: string): Tau {
 					resolved[name] = file.file;
 					paths[name] = file.paths;
 				}
-			if (givenArgs !== undefined) problems.push(...argsProblems(givenArgs, files, validate));
+			if (givenArgs !== undefined)
+				problems.push(
+					...argsProblems(givenArgs, files, validate),
+					...argPlaceholderProblems(givenArgs, [...Object.keys(files), ...Object.keys(given ?? {})], declaredArgs),
+				);
 			if (problems.length > 0) throw new TypeError(`the call does not fit the tau:\n  ${problems.join("\n  ")}`);
 			return { files: resolved, paths, args: givenArgs ?? {} };
 		},
@@ -189,7 +204,10 @@ export function loadTau(dir: string): Tau {
 				const known = kind ?? declared?.kind;
 				checked[name] = { mode, ...(known === undefined ? {} : { kind: known }), base };
 			}
-			problems.push(...argsProblems(call.args, files, validate));
+			problems.push(
+				...argsProblems(call.args, files, validate),
+				...argPlaceholderProblems(call.args, [...Object.keys(files), ...Object.keys(call.files)], declaredArgs),
+			);
 			if (problems.length > 0) throw new TypeError(`the call does not fit the tau:\n  ${problems.join("\n  ")}`);
 			return { files: checked, args: call.args };
 		},
@@ -201,12 +219,14 @@ export function loadTau(dir: string): Tau {
 				placeOf.set(name, place);
 			}
 			placeOf.set(SELF, self);
-			const expandedArgs = expandArgs(call.args, placeOf) as { readonly [name: string]: Json };
+			const { args: expandedArgs, problems } = expandArgs(call.args, placeOf, declaredArgs);
+			if (problems.length > 0) throw new TypeError(`the args do not expand:\n  ${problems.join("\n  ")}`);
 			return {
 				prompt: expand(template, (names) => {
-					const [first = ""] = names;
-					const place = names.length === 1 ? placeOf.get(first) : undefined;
-					return place ?? argText(expandedArgs, names);
+					const place = names.length === 1 ? placeOf.get(names[0] as string) : undefined;
+					if (place !== undefined) return place;
+					const found = lookup(expandedArgs, names);
+					return found === undefined ? "" : textOf(found);
 				}),
 				args: expandedArgs,
 				init: command === undefined ? undefined : expand(command, ([first = ""]) => shellWord(placeOf.get(first) as string)),
@@ -332,27 +352,82 @@ function schemaProblem({ instancePath, message, keyword, params }: ErrorObject):
 	return `${["args", ...at].join(".")}: ${message ?? "does not fit the schema"}${extra}`;
 }
 
+/** Where a value lies in the args: a property's name, or an item's index. */
+type Step = string | number;
+
 /**
- * `value`, each string's placeholders expanded (docs/spec/placeholders.md): `${name}`, where
- * `places` has `name`, becomes its place; after one or more `$`, `${name}` loses one, whatever the
- * name; anything else stays.
+ * The args, each string's placeholders expanded (docs/spec/placeholders.md): `${self}` and
+ * `${name}` naming a file become the place `places` gives, and `${name}` naming an arg, or
+ * `${name.field}` what lies in one, the expansion of its value, a string as it is and anything
+ * else as JSON, and nothing for what the args lack. Each placeholder `places` and the args do not
+ * name, and each value that names itself, through as many others as it does, is a problem, and
+ * expands to nothing.
  */
-function expandArgs(value: Json, places: ReadonlyMap<string, string>): Json {
-	if (typeof value === "string")
-		return value.replace(ARG_PLACEHOLDER, (whole, escapes: string, name: string) => {
-			if (escapes !== "") return `${escapes.slice(1)}\${${name}}`;
-			return places.get(name) ?? whole;
-		});
-	if (Array.isArray(value)) return value.map((item) => expandArgs(item, places));
-	if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, expandArgs(item as Json, places)]));
+function expandArgs(
+	args: { readonly [name: string]: Json },
+	places: ReadonlyMap<string, string>,
+	declaredArgs: ReadonlySet<string>,
+): { args: { readonly [name: string]: Json }; problems: string[] } {
+	const problems: string[] = [];
+	const done = new Map<string, string>();
+	const expanding: { key: string; at: string }[] = [];
+	const problemOf = (inside: string) =>
+		placeholderProblem(
+			inside,
+			(name) => places.has(name),
+			(name) => declaredArgs.has(name) || Object.hasOwn(args, name),
+			"an arg",
+		);
+	const where = (at: readonly Step[]): string => ["args", ...at].join(".");
+	const value = (item: Json, at: readonly Step[]): Json => {
+		if (typeof item === "string") return string(item, at);
+		if (Array.isArray(item)) return item.map((entry, index) => value(entry, [...at, index]));
+		if (isObject(item)) return Object.fromEntries(Object.entries(item).map(([key, entry]) => [key, value(entry as Json, [...at, key])]));
+		return item;
+	};
+	const string = (text: string, at: readonly Step[]): string => {
+		const key = JSON.stringify(at);
+		const known = done.get(key);
+		if (known !== undefined) return known;
+		const cycle = expanding.findIndex((entry) => entry.key === key);
+		if (cycle !== -1) {
+			const through = expanding.slice(cycle + 1).map((entry) => entry.at);
+			problems.push(`${where(at)}: names itself${through.length === 0 ? "" : `, through ${through.join(", ")}`}`);
+			return "";
+		}
+		expanding.push({ key, at: where(at) });
+		let expanded = "";
+		try {
+			expanded = expand(parseTemplate(text, problemOf, () => where(at)), (names) => {
+				const place = names.length === 1 ? places.get(names[0] as string) : undefined;
+				if (place !== undefined) return place;
+				const found = lookup(args, names);
+				return found === undefined ? "" : textOf(value(found, names));
+			});
+		} catch (error) {
+			problems.push(messageOf(error));
+		}
+		expanding.pop();
+		done.set(key, expanded);
+		return expanded;
+	};
+	return { args: value(args, []) as { readonly [name: string]: Json }, problems };
+}
+
+/** The problems of the placeholders in `args`, given the files `names`, before any has a place. */
+function argPlaceholderProblems(args: { readonly [name: string]: Json }, names: Iterable<string>, declaredArgs: ReadonlySet<string>): string[] {
+	return expandArgs(args, new Map([SELF, ...names].map((name) => [name, ""])), declaredArgs).problems;
+}
+
+/** What `names` finds in the args: through as many objects as it lies in; undefined for what they lack. */
+function lookup(args: { readonly [name: string]: Json }, names: readonly string[]): Json | undefined {
+	let value: Json | undefined = args;
+	for (const name of names) value = isObject(value) && Object.hasOwn(value, name) ? (value[name] as Json) : undefined;
 	return value;
 }
 
-/** What `names` finds in the args, as the prompt has it: a string as it is, anything else as JSON, and nothing for what they lack. */
-function argText(args: { readonly [name: string]: Json }, names: readonly string[]): string {
-	let value: Json | undefined = args;
-	for (const name of names) value = isObject(value) && Object.hasOwn(value, name) ? (value[name] as Json) : undefined;
-	if (value === undefined) return "";
+/** A value as a placeholder becomes it: a string as it is, anything else as JSON. */
+function textOf(value: Json): string {
 	return typeof value === "string" ? value : JSON.stringify(value);
 }
 
@@ -504,18 +579,18 @@ function readSchema(args: unknown, files: { readonly [name: string]: FileDeclara
 	}
 }
 
-/** A prompt, or an init, as text around placeholders: `text` has one more entry than `names`, each a path of names. */
+/** A prompt, an init, or a string of the args, as text around placeholders: `text` has one more entry than `names`, each a path of names. */
 interface Template {
 	readonly text: readonly string[];
 	readonly names: readonly (readonly string[])[];
 }
 
 /**
- * `prompt` as a template, each placeholder checked by `problemOf`, and named in what it throws as
- * `where` says from its line.
+ * `source` as a template (docs/spec/placeholders.md), each placeholder checked by `problemOf`,
+ * and named in what it throws as `where` says from its line.
  */
 function parseTemplate(
-	prompt: string,
+	source: string,
 	problemOf: (inside: string) => string | undefined,
 	where: (line: number) => string,
 ): Template {
@@ -523,37 +598,43 @@ function parseTemplate(
 	const names: string[][] = [];
 	let chunk = "";
 	let last = 0;
-	for (const match of prompt.matchAll(PLACEHOLDER)) {
-		chunk += prompt.slice(last, match.index);
-		last = match.index + match[0].length;
-		if (match[0] === "$${") {
-			chunk += "${";
+	const opening = new RegExp(OPENING);
+	for (let match = opening.exec(source); match !== null; match = opening.exec(source)) {
+		const dollars = match[1] as string;
+		chunk += source.slice(last, match.index);
+		last = opening.lastIndex;
+		if (dollars.length > 1) {
+			chunk += `${dollars.slice(1)}{`;
 			continue;
 		}
-		const [placeholder, inside = "", closed] = match;
-		const at = where(prompt.slice(0, match.index).split("\n").length);
+		INSIDE.lastIndex = last;
+		const [rest, inside = "", closed] = INSIDE.exec(source) as RegExpExecArray;
+		const placeholder = `\${${rest}`;
+		const at = where(source.slice(0, match.index).split("\n").length);
 		if (closed === "") throw new TypeError(`${at}: ${placeholder} is not closed; write $\${ for a literal \${`);
 		const problem = problemOf(inside);
 		if (problem !== undefined) throw new TypeError(`${at}: ${placeholder} ${problem}`);
+		last += rest.length;
+		opening.lastIndex = last;
 		text.push(chunk);
 		names.push(inside.split("."));
 		chunk = "";
 	}
-	text.push(chunk + prompt.slice(last));
+	text.push(chunk + source.slice(last));
 	return { text, names };
 }
 
 /**
- * Why `${inside}` cannot be in a prompt, if it cannot: it names `self`, a file, or an arg the
- * schema declares in its top-level properties, or what lies in one of those args.
+ * Why `${inside}` cannot be in a prompt, or in the args, if it cannot: it names `self`, a file, or
+ * an arg, `isFile` and `isArg` say which, or what lies in an arg; `anArg` says which args it may name.
  */
-function placeholderProblem(inside: string, files: { readonly [name: string]: FileDeclaration }, args: ReadonlySet<string>): string | undefined {
+function placeholderProblem(inside: string, isFile: (name: string) => boolean, isArg: (name: string) => boolean, anArg: string): string | undefined {
 	const [first = "", ...rest] = inside.split(".");
 	if (inside.split(".").some((name) => name === "")) return "names nothing between its dots; write $\${ for a literal \${";
-	if (first === SELF || Object.hasOwn(files, first))
+	if (first === SELF || isFile(first))
 		return rest.length === 0 ? undefined : `names what lies in ${first === SELF ? "the tau's own directory" : `the file ${first}`}, which is a path`;
-	if (args.has(first)) return undefined;
-	return `names neither \${${SELF}}, a file, nor an arg the schema declares in its properties; write $\${ for a literal \${`;
+	if (isArg(first)) return undefined;
+	return `names neither \${${SELF}}, a file, nor ${anArg}; write $\${ for a literal \${`;
 }
 
 /** Why `${inside}` cannot be in an init, if it cannot: it names neither `self` nor a file. */

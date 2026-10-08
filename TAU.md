@@ -108,13 +108,12 @@ A **call** gives each file a path, and the args, as JSON:
   `"notes": {"mode": "in", "path": "notes.md"}`, which the args name.
 - **Args** are any JSON, nesting to any depth, that fits `args`, a JSON Schema (draft 2020-12) of
   an object.
-- **Placeholders**: `${name}`, naming a file, becomes its **place**, where the agent sees it, and
-  `${self}` the tau's own directory, which the agent reads but does not change, in the prompt, in
-  every string of the args, at any depth, and in init. The prompt also names args, `${cities}` or
-  `${dates.start}`: a string as it is, anything else as JSON, and nothing for what the args lack.
-  In args, a placeholder preceded by `$` loses one, `$${trip}` becoming `${trip}`, and anything
-  else stays as written; in the prompt and init, `$${` is a literal `${`, and any other `${` is
-  refused.
+- **Placeholders**, in the prompt, in every string of the args, at any depth, and in init:
+  `${name}`, naming a file, becomes its **place**, where the agent sees it; `${self}` the tau's own
+  directory, which the agent reads but does not change; and, except in init, an arg, `${cities}` or
+  `${dates.start}`, its value, expanded, a string as it is, anything else as JSON, and nothing for
+  what the args lack, so one arg can name a file or another arg, but not itself. A run of `$`
+  before a `{` loses one, `$${trip}` becoming a literal `${trip}`; any other `${` is refused.
 - An API is declared in `api/<name>/` as TypeScript, whose doc comments say what it does, and the
   runtime implements it, so the tau holds neither its code nor credentials. `node_modules/` holds
   packages built on the APIs. The agent runs its programs with `node`, Node.js 24 or later, as

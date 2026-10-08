@@ -25,7 +25,8 @@ checkOutputs(call, places);                                  // 6. check what th
    The tau it gives has its `description`, `files`, `args`, the schema, `exposes`, and `init`, as
    `tau.json` declares them, for usage, or to offer the tau to another agent as a tool.
 2. **Resolve the call.** `tau.resolve(call, cwd)` checks `call` against the tau (see
-   [Calls](calls.md)), the args against the schema, with Ajv, and gives, without doing anything,
+   [Calls](calls.md)), the args against the schema, with Ajv, and their placeholders (see
+   [Placeholders](placeholders.md)), and gives, without doing anything,
    the call as a run takes it: its `files`, by name, those `tau.json` declares first, in its order,
    then the extra files, in the call's, each with its `mode`, its `kind`, where it has one, and the
    base name its place keeps (`base`); their `paths`, each resolved against `cwd`, or, for an `in`
@@ -91,7 +92,7 @@ const result = packResult({ ok, text, failure }, call, places);        // step 6
   content's file or directory, its symlinks last.
 - **Check an archive's call.** `tau.check(json)` checks a call `readCall` read, from a caller the
   runtime does not trust, against the tau, as step 2 does: each file's mode and kind against what
-  `tau.json` declares, each extra file's name, and the args against the schema. It gives the call,
+  `tau.json` declares, each extra file's name, and the args against the schema, and their placeholders. It gives the call,
   its files in step 2's order, each with the kind `tau.json` declares, where the call gives none.
 - **Place it.** `placeCall(call, { places, tau })` gives each `in` and `inout` file its content at
   its place, and the tau's directory at `tau`, when given, making the directories each lies in, and

@@ -15,8 +15,8 @@ the [spec](spec/index.md) and the library use these, and no others.
 | **kind** | What a file is: `file` or `dir`; a file declared without one may be either. |
 | **args** | The JSON a run takes beside its files: an object, nesting to any depth. **An arg** is one of its properties. |
 | **schema** | `args` in `tau.json`: a JSON Schema (draft 2020-12) that a call's args fit. |
-| **placeholder** | `${name}`, `${a.b}` or `${self}`, in the prompt, in a string of the args, or in init, which **expanding** replaces: a file by its place, `self` by the tau's directory, and, in the prompt, an arg by its value. |
-| **escaped** | A placeholder preceded by `$`: in the args, expanding drops one `$`, so `$${name}` reaches the agent as `${name}`, for a run it makes; in the prompt and init, `$${` is a literal `${`. |
+| **placeholder** | `${name}`, `${a.b}` or `${self}`, in the prompt, in a string of the args, or in init, which **expanding** replaces: a file by its place, `self` by the tau's directory, and, except in init, an arg by its value, expanded. |
+| **escaped** | A placeholder preceded by `$`: expanding drops one `$` from each run of `$` before a `{`, so `$${name}` is a literal `${name}`, which an agent passes on to a run it makes. |
 | **self** | The tau's own directory, as `${self}` names it. |
 | **API** | `api/<name>/`: TypeScript declarations of what the tau's code calls, imported as `@api/<name>`. |
 | **implementation** | The module a runtime gives for an API. |

@@ -172,22 +172,56 @@ test("an `in` given a list of paths is a directory holding each under its base n
 	assert.throws(() => tau.resolve({ files: { ...call.files, pages: ["a", ""] } }, cwd), /pages: "" is not a path/);
 });
 
-test("an arg's placeholders name only files and the tau's own directory, at any depth, each `$` before one escapes it once, and the rest stays", () => {
+test("an arg's placeholders name files, the tau's own directory and args, at any depth, each expanding to its value's expansion, and `$`s before a `{` lose one", () => {
 	const tau = tauOf("argsplaceholders", {
 		files: { site: { kind: "dir", mode: "inout", description: "The site." } },
-		args: { type: "object" },
+		args: { type: "object", properties: { later: { type: "string" } } },
 	});
 	const args = {
 		start: "${site}/index.html",
-		nested: [{ deep: "from ${self}/guide.md, not $${site}, ${other}, $${other}, $$${site}, $1 or ${site" }, 3, true, null],
+		nested: [{ deep: "from ${self}/guide.md, after ${start}, not $${site}, $${other}, $$${site}, $${ alone, $1 or $PATH" }, 3, true, null],
+		page: { name: "about", path: "${site}/${page.name}.html", copy: "${page.path}" },
+		whole: "${page}|${start.x}|${later}",
 		"${site}": "keys stay",
 	};
+	const page = { name: "about", path: "/work/s/about.html", copy: "/work/s/about.html" };
 	assert.deepEqual(tau.expand(tau.resolve({ files: { site: "s" }, args }, cwd), { site: "/work/s" }, "/tau").args, {
 		start: "/work/s/index.html",
-		nested: [{ deep: "from /tau/guide.md, not ${site}, ${other}, ${other}, $${site}, $1 or ${site" }, 3, true, null],
+		nested: [{ deep: "from /tau/guide.md, after /work/s/index.html, not ${site}, ${other}, $${site}, ${ alone, $1 or $PATH" }, 3, true, null],
+		page,
+		whole: `${JSON.stringify(page)}||`,
 		"${site}": "keys stay",
 	});
 	assert.throws(() => tau.resolve({ files: { site: "s" }, args: { self: "x" } }, cwd), /args\.self: names the tau's own directory, which no arg does/);
+
+	const refused = {
+		unknown: "${other}",
+		open: "${site",
+		field: "${site.x}",
+		selfx: "${self.x}",
+		dots: "${start..x}",
+		loop: "${loop}",
+		a: { b: "${c}" },
+		c: ["${a.b}"],
+		o: { x: "${o}" },
+	};
+	assert.throws(() => tau.resolve({ files: { site: "s" }, args: refused }, cwd), (error: Error) => {
+		assert.deepEqual(error.message.split("\n"), [
+			"the call does not fit the tau:",
+			"  args.unknown: ${other} names neither ${self}, a file, nor an arg; write $${ for a literal ${",
+			"  args.open: ${site is not closed; write $${ for a literal ${",
+			"  args.field: ${site.x} names what lies in the file site, which is a path",
+			"  args.selfx: ${self.x} names what lies in the tau's own directory, which is a path",
+			"  args.dots: ${start..x} names nothing between its dots; write $${ for a literal ${",
+			"  args.loop: names itself",
+			"  args.a.b: names itself, through args.c.0",
+			"  args.o.x: names itself",
+		]);
+		return true;
+	});
+	const site = { mode: "inout", kind: "dir", base: "s" } as const;
+	assert.throws(() => tau.check({ files: { site }, args: { loop: "${loop}" } }), /args\.loop: names itself/);
+	assert.throws(() => tau.expand({ files: { site }, args: { loop: "${loop}" } }, { site: "/work/s" }), /^TypeError: the args do not expand:\n {2}args\.loop: names itself$/u);
 });
 
 test("a call may give extra files, each with its mode, which the args name, and a declared file with its mode too", () => {
@@ -347,13 +381,13 @@ test("the prompt names files, args the schema declares, what lies in them, and t
 		},
 	};
 	const tau = tauOf("prompts/ok", json, "${a}${a} $${a} $$${a}|${n}|${o}|${o.x.y}|${o.missing}|${l}|${b}|${z}|${o.x.y.z}");
-	// An arg is not expanded again: only its own placeholders, for files and `self`, were.
+	// An arg is expanded once: what it expands to, an escaped placeholder included, is not expanded again.
 	const prompt = (call: object) => {
 		const resolved = tau.resolve(call, cwd);
 		return tau.expand(resolved, atPaths(resolved)).prompt;
 	};
-	const call = { files: { f: "f.md" }, args: { a: "${a}:${f}", n: 1.5, o: { x: { y: "deep" } }, l: ["a, b", 'say "hi"'], b: false, z: null } };
-	assert.equal(prompt(call), '${a}:/home/u/f.md${a}:/home/u/f.md ${a} $${a}|1.5|{"x":{"y":"deep"}}|deep||["a, b","say \\"hi\\""]|false|null|');
+	const call = { files: { f: "f.md" }, args: { a: "$${a}:${f}", n: 1.5, o: { x: { y: "${n} deep" } }, l: ["a, b", 'say "hi"'], b: false, z: null } };
+	assert.equal(prompt(call), '${a}:/home/u/f.md${a}:/home/u/f.md ${a} $${a}|1.5|{"x":{"y":"1.5 deep"}}|1.5 deep||["a, b","say \\"hi\\""]|false|null|');
 	// What the args lack is nothing, as an arg the call leaves out.
 	assert.equal(prompt({ files: { f: "f.md" } }), " ${a} $${a}||||||||");
 });
