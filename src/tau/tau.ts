@@ -1,10 +1,8 @@
-import { existsSync, lstatSync, readFileSync, type Stats, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, type Stats, statSync } from "node:fs";
 import path from "node:path";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
+import { API_SCOPE, type Api, type Exposed, readApis, readExposed } from "./apis.js";
 import { linkProblems, valueLinkProblems } from "./links.js";
-
-/** How the agent's programs import an API: `@api/<name>` (docs/spec/apis.md). */
-export const API_SCOPE = "@api/";
 
 /**
  * What the agent does with a file (docs/spec/calls.md): `in`, reads it; `out`, leaves something
@@ -36,12 +34,13 @@ export interface Tau {
 	readonly files: { readonly [name: string]: FileDeclaration };
 	/** The schema of the args, a JSON Schema (draft 2020-12) of an object; undefined when the tau takes none. */
 	readonly args: { readonly [keyword: string]: Json } | undefined;
+	/** Its APIs, each a copy of a contract in `api/<alias>/`, in the order of their aliases. */
+	readonly apis: readonly Api[];
 	/**
-	 * What the agent's programs import, as tau.json lists it: an API, as `@api/<name>`, or a package
-	 * of the tau's own, by its name; undefined without the list, when they import every API.
-	 * `loadExposed` checks it against the tau.
+	 * What the agent's programs import, in the order tau.json's `exposes` lists it: an API, or a
+	 * package of the tau's own; without the list, every API.
 	 */
-	readonly exposes: readonly string[] | undefined;
+	readonly exposed: readonly Exposed[];
 	/**
 	 * The command a runtime runs, with `sh -c`, before the agent, which may do the run without it
 	 * (docs/spec/init.md), as tau.json gives it; undefined without one. `expand` expands it.
@@ -123,8 +122,9 @@ const ARG_UNKNOWN = `neither \${${SELF}}, a file, nor an arg`;
  * The tau at `dir`: its PROMPT.md, and its tau.json if it has one (without it, the tau takes no
  * files and no args). Throws, naming the file and the reason, when tau.json breaks the spec or the
  * prompt names what it cannot, and, listing every one, for a symlink that breaks the spec in what a
- * runtime reads, node_modules/ included when the tau exposes a package of its own. APIs are loaded
- * separately, with `loadApis`, and what the tau exposes is checked against them with `loadExposed`.
+ * runtime reads, node_modules/ included when the tau exposes a package of its own, and then for
+ * APIs and what the tau exposes that break the spec. It type-checks neither the APIs nor the
+ * packages, which `tau check`, of @sleepymug/tau-dev, does.
  */
 export function loadTau(dir: string): Tau {
 	const absolute = path.resolve(dir);
@@ -153,6 +153,10 @@ export function loadTau(dir: string): Tau {
 	}
 	const problems = linkProblems(absolute, exposes?.some((specifier) => !specifier.startsWith(API_SCOPE)) ?? false);
 	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
+	const root = realpathSync(absolute);
+	const apis = readApis(root, problems);
+	const exposed = readExposed(root, exposes, apis, problems);
+	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
 
 	return {
 		dir: absolute,
@@ -160,7 +164,8 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		files,
 		args,
-		exposes,
+		apis,
+		exposed,
 		init,
 		resolve(call, cwd) {
 			const problems: string[] = [];

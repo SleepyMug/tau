@@ -1,7 +1,13 @@
-export { type Api, checkImplementation, loadApis } from "./api/api.js";
-export { type Exposed, loadExposed } from "./api/exposed.js";
 export {
 	API_SCOPE,
+	type Api,
+	type Contract,
+	type Exposed,
+	parseVersion,
+	readContract,
+	serves,
+} from "./tau/apis.js";
+export {
 	type CallFile,
 	type CheckedCall,
 	checkInputs,

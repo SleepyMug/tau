@@ -1,7 +1,7 @@
 # TAU (Transportable Agent Unit)
 
 A **tau** is an agent packaged as a directory: a prompt, the files and args it takes, and the APIs
-its programs call, declared in TypeScript.
+its programs call, each a contract declared in TypeScript.
 
 ## Layout
 
@@ -11,8 +11,8 @@ plan-trip/
 ├── tau.json                    its files and args, what its programs import, and its init
 ├── init.mts                    run first: writes the itinerary itself if the trip is booked
 ├── skills/visas/SKILL.md       a skill the agent can use
-├── api/travel/index.d.ts       an API, which programs import as @api/travel
-├── api/tau/index.d.ts          the tau API
+├── api/travel/                 an API: a copy of the contract @acme/travel, imported as @api/travel
+├── api/tau/                    the tau API: a copy of @sleepymug/tau-api
 ├── node_modules/trip-search/   a package of its own, built on @api/travel
 └── taus/city-guide/            the author's own: here, a tau it runs
 ```
@@ -114,8 +114,10 @@ A **call** gives each file a path, and the args, as JSON:
   `${dates.start}`, its value, expanded, a string as it is, anything else as JSON, and nothing for
   what the args lack, so one arg can name a file or another arg, but not itself. A run of `$`
   before a `{` loses one, `$${trip}` becoming a literal `${trip}`; any other `${` is refused.
-- An API is declared in `api/<name>/` as TypeScript, whose doc comments say what it does, and the
-  runtime implements it, so the tau holds neither its code nor credentials. `node_modules/` holds
+- An API is a **contract**, an npm package of TypeScript declarations whose doc comments say what
+  it does, named and versioned. A tau holds a copy of it in `api/<alias>/`, its `package.json`
+  and declarations, which programs import as `@api/<alias>`, and the runtime implements it, by its
+  name and version, so the tau holds neither its code nor credentials. `node_modules/` holds
   packages built on the APIs. The agent runs its programs with `node`, Node.js 24 or later, as
   JavaScript or as TypeScript Node.js runs as is, and they import what `exposes` lists, by default
   every API, resolving from the tau's directory, as its own code does.
@@ -135,8 +137,8 @@ A **call** gives each file a path, and the args, as JSON:
 A **runtime** runs a tau for a **caller**: a person, a program, or another agent.
 
 - **A call** gives every declared file a path, and args that fit the schema. A runtime refuses
-  one it cannot carry out as declared: args or a path that do not fit, an API it has no
-  implementation of.
+  one it cannot carry out as declared: args or a path that do not fit, an API whose contract it
+  implements at no version that serves the tau's copy.
 - **The run succeeds** if the agent finishes on its own, neither stopped nor failing, or its init
   does the run in its place, and leaves a file or a directory, as declared, at each `out` and
   `inout` file's place. The caller's paths then hold what it left, a directory merging into one

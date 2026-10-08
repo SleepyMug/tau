@@ -286,7 +286,7 @@ test("a call may give extra files, each with its mode, which the args name, and 
 
 test("a tau without tau.json takes no files and no args", () => {
 	const tau = loadTau(write("plain", { "PROMPT.md": "Say hi. Costs $1, and $${x} stays as it is." }));
-	assert.deepEqual([tau.description, tau.files, tau.args, tau.exposes, tau.init], [undefined, {}, undefined, undefined, undefined]);
+	assert.deepEqual([tau.description, tau.files, tau.args, tau.apis, tau.exposed, tau.init], [undefined, {}, undefined, [], [], undefined]);
 	const empty = { files: {}, paths: {}, args: {} };
 	assert.deepEqual(tau.resolve({}, cwd), empty);
 	assert.deepEqual(tau.resolve({ files: {}, args: {} }, cwd), empty);

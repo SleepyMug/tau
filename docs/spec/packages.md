@@ -12,12 +12,11 @@ since that would hide the runtime's implementations (see [Implementations](imple
 Each package `exposes` names keeps to this:
 - **It is JavaScript, with declarations.** It is at `node_modules/<name>`, runs on Node.js 24 or
   later, and has TypeScript declarations of what programs import of it.
-- **It type-checks.** Its declarations, and what they import, are checked as API files are (see
-  [APIs](apis.md)), with `@api/<name>` typed by `api/<name>/index.d.ts`, so that it is built on
-  the APIs as the tau declares them, not on an implementation. TypeScript must find no errors in
-  the package's own files, and every import in the files it reaches resolves. The types of the
-  packages it uses are taken as they are.
+- **It type-checks.** Its declarations, and what they import, are checked as a contract's are (see
+  [Contracts](contracts.md)), with `@api/<alias>` typed by `api/<alias>/index.d.ts`, so that it is
+  built on the APIs as the tau holds them, not on an implementation. TypeScript must find no
+  errors in the package's own files, and every import in the files it reaches resolves. The types
+  of the packages it uses are taken as they are.
 - **It is self-contained.** Each import, in its declarations and its JavaScript, resolves to a
-  file in the tau, to Node.js's own modules, or, as `@api/<name>`, to an API the tau declares.
-- **Documentation:** the first doc comment of its declarations, if it has `@packageDocumentation`,
-  or else its `package.json`'s `description`, describes it.
+  file in the tau, to Node.js's own modules, or, as `@api/<alias>`, to an API the tau holds.
+- **Documentation:** its `package.json`'s `description`, if it has one, describes it.

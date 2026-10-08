@@ -5,8 +5,9 @@ my-agent/
 ├── PROMPT.md            # required: the prompt (prompt.md)
 ├── tau.json             # optional: its files and args, and more (metadata.md)
 ├── skills/              # optional: skills, each a directory in it with a SKILL.md
-├── api/                 # optional: the APIs, a directory each (apis.md)
+├── api/                 # optional: the APIs, each a copy of a contract (apis.md)
 │   └── notes/
+│       ├── package.json
 │       ├── index.d.ts
 │       └── tags.d.ts
 └── node_modules/        # optional: packages of its own, built on its APIs (packages.md)

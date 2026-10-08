@@ -19,13 +19,17 @@ the [spec](spec/index.md) and the library use these, and no others.
 | **scope** | What a run's placeholders name, each by its first name: `self`, its files and its args, one name naming one thing. |
 | **escaped** | A placeholder preceded by `$`: expanding drops one `$` from each run of `$` before a `{`, so `$${name}` is a literal `${name}`, which an agent passes on to a run it makes. |
 | **self** | The tau's own directory, as `${self}` names it. |
-| **API** | `api/<name>/`: TypeScript declarations of what the tau's code calls, imported as `@api/<name>`. |
-| **implementation** | The module a runtime gives for an API. |
+| **API** | `api/<alias>/`: a copy of a contract, what the tau's code calls, imported as `@api/<alias>`. |
+| **alias** | An API's directory's name in `api/`, the tau's own, by which programs import it. |
+| **contract** | An API as it is published: an npm package of TypeScript declarations, its name and version its identity. |
+| **declarations** | A contract's `index.d.ts`, and the declaration files it imports: the whole contract, its doc comments saying what each does. |
+| **version** | A contract's SemVer version; a version **serves** another when code written for that one works with it: the same major, a minor no less, and, under 1.0.0, the same minor. |
+| **implementation** | The module a runtime gives for an API: of its contract, at a version that serves the tau's copy. |
 | **package** | Code of the tau's own, in its `node_modules/`, built on its APIs. |
 | **exposes** | What the agent's programs import: APIs, and packages of the tau's own. |
 | **skill** | `skills/<name>/`, with a `SKILL.md`, which the agent can use. |
 | **init** | A command a runtime runs before the agent, which may **skip** it, doing the run itself, **run** it, or **fall back** to it, having failed. |
-| **tau API** | `@api/tau`: a run's files and args, runs of other taus, and init's exit codes. |
+| **tau API** | The contract `@sleepymug/tau-api`, by convention `@api/tau`: a run's files and args, runs of other taus, and init's exit codes. |
 
 ## A run
 
@@ -60,4 +64,7 @@ the [spec](spec/index.md) and the library use these, and no others.
 | `path`, as a kind | A file declared without a kind. |
 | JSON Pointer, blob id | A file's name, which keys outputs and names content in an archive. |
 | `bind`, `BoundFile`, `Placing`, a file's `host` and `view` | `resolve`, a call on the caller's side, with its paths; `check`, an archive's call on the runtime's; `expand`, with each file's place. |
+| an API's name, an API declared for its tau, which may declare less than an implementation | An alias, and the contract the tau holds a copy of, whole: packages of the tau's own, and `exposes`, shape what the model sees. |
+| an implementation that fits an API, `checkImplementation`, `loadApis`, `loadExposed` | One of the API's contract, at a version that serves the tau's copy, matched by name and version; `loadTau` reads the APIs and what the tau exposes, and `tau check` type-checks them. |
+| `@packageDocumentation`, as what describes an API or a package | Its `package.json`'s `description`. |
 | `at`, `share`, `role`, `vars`, `paths`; `args` as a positional list | Earlier designs: places were declared, then are the runtime's; `share` and `role` became modes; texts and paths became files and args. |

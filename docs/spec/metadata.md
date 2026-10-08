@@ -41,7 +41,7 @@ Each key is optional, and any other is refused:
   name to what it is (see [Files](#files)). A call gives a path for every one, and may give
   others, with their modes (see [Calls](calls.md)).
 - **`args`** is the **schema** of the args (see [Args](#args)).
-- **`exposes`** names what the agent's programs import, each once: an API, as `@api/<name>` (see
+- **`exposes`** names what the agent's programs import, each once: an API, as `@api/<alias>` (see
   [APIs](apis.md)), or a package of the tau's own, by its name (see [Packages](packages.md)).
   Without it, they import every API.
 - **`init`** is a command, a string that is not blank, that a runtime runs before the agent, and

@@ -6,14 +6,13 @@ to pack and place a run's call and result (see [Calls and results](#calls-and-re
 of its checks throws, listing every problem it finds. A runtime uses it in the order of a run:
 
 ```ts
-import { checkImplementation, checkInputs, checkOutputs, loadApis, loadExposed, loadTau } from "@sleepymug/tau";
+import { checkInputs, checkOutputs, loadTau, serves } from "@sleepymug/tau";
 
-const tau = loadTau(dir);                                    // 1. read the tau
+const tau = loadTau(dir);                                    // 1. read the tau, its APIs, and what it exposes
 const call = tau.resolve(given, cwd);                        // 2. resolve the call
 checkInputs(call);                                           // 3. check the files
-const apis = loadApis(dir);                                  // 4. load the APIs
-for (const api of apis) checkImplementation(api, implementationOf(api.name));
-const exposed = loadExposed(tau, apis);
+for (const api of tau.apis)                                  // 4. find each API an implementation
+  implementations.find((it) => it.contract === api.contract && serves(it.version, api.version));
 const run = tau.expand(call, places, self);                  // 5. expand it with each file's place, and run:
 // give the files, link the APIs, run the agent on run.prompt
 checkOutputs(call, places);                                  // 6. check what the agent left
@@ -22,8 +21,17 @@ checkOutputs(call, places);                                  // 6. check what th
 1. **Read the tau.** `loadTau(dir)` reads `PROMPT.md` and `tau.json` (see [Metadata](metadata.md)
    and [Placeholders](placeholders.md)), checks the schema of the args with JSON Schema's
    meta-schema, and checks the symlinks of what a runtime reads (see [Directory](directory.md)).
-   The tau it gives has its `description`, `files`, `args`, the schema, `exposes`, and `init`, as
-   `tau.json` declares them, for usage, or to offer the tau to another agent as a tool.
+   The tau it gives has its `description`, `files`, `args`, the schema, and `init`, as `tau.json`
+   declares them, for usage, or to offer the tau to another agent as a tool. It reads the APIs
+   too, as [APIs](apis.md) has them: each directory in `api/`, holding only `package.json` and
+   declaration files, its `package.json` a contract's (see [Contracts](contracts.md)), and no two
+   holding the same contract; and gives each in `apis`, with its `alias`, its `specifier`
+   (`@api/<alias>`), its `dir`, its `contract` and `version`, and its `description`. And it gives
+   what the agent's programs import, in `exposed`, as `exposes` lists it (see
+   [Packages](packages.md)): each an API, with the API, or a package of the tau's own, with its
+   `dir`, which has a `package.json`, in a `node_modules/` with no `@api` scope; and each with its
+   `specifier` and `description`. It does not type-check the APIs or the packages, as their
+   authors do (see [Development](development.md)).
 2. **Resolve the call.** `tau.resolve(call, cwd)` checks `call` against the tau (see
    [Calls](calls.md)), the args against the schema, with Ajv, and their placeholders (see
    [Placeholders](placeholders.md)), and gives, without doing anything,
@@ -32,13 +40,10 @@ checkOutputs(call, places);                                  // 6. check what th
    base name its place keeps (`base`); their `paths`, each resolved against `cwd`, or, for an `in`
    given a list, each of its paths; and the `args`, as given.
 3. **Check the files.** `checkInputs(call)` checks what [Paths](paths.md) asks when the run starts.
-4. **Load the APIs.** `loadApis(dir)` checks the APIs as [APIs](apis.md) has them, and gives each
-   one's `name`, `specifier` (`@api/<name>`), `file`, its `index.d.ts`, whose directory holds its
-   files, and `description`. `checkImplementation(api, module)` checks that a module, its
-   JavaScript with declarations beside it, or its declarations, fits the API (see
-   [Implementations](implementations.md)). `loadExposed(tau, apis)` gives what the agent's programs
-   import, as `exposes` lists it: each an API, or a package of the tau's own, with its `dir`,
-   checked as [Packages](packages.md) has it; and each with its `specifier` and `description`.
+4. **Find each API an implementation.** `serves(version, held)` says whether an implementation at
+   `version` serves an API whose copy is at `held` (see [Contracts](contracts.md#versions)). The
+   runtime finds each API an implementation of its contract that does, and refuses to start when
+   one has none (see [Implementations](implementations.md)).
 5. **Expand, and run.** This is the runtime's: it chooses each file's **place**, where the agent
    sees it, keeping its base name (see [Running](running.md)), such as its path, for a runtime
    that does not copy, which cannot place an `in` given a list. `tau.expand(call, places, self)`
@@ -46,7 +51,7 @@ checkOutputs(call, places);                                  // 6. check what th
    placeholders expanded with the places, and `self`, where the agent sees the tau's own directory,
    by default where the tau is (see [Placeholders](placeholders.md)). The runtime gives the agent
    its files as [Running](running.md) has it; links each API to its implementation as
-   `@api/<name>`, wherever the tau's code imports it (see [Implementations](implementations.md));
+   `@api/<alias>`, wherever the tau's code imports it (see [Implementations](implementations.md));
    presents what the tau exposes, and its skills, to the model (see [Runtimes](runtimes.md)); gives
    the agent's programs the places of the files and the args; runs the tau's init, if it has one
    (see [Init](init.md)); and runs the agent on the prompt, unless init skipped it.
@@ -61,7 +66,7 @@ checkOutputs(call, places);                                  // 6. check what th
 
 For a runtime whose agent works elsewhere, the library packs a run as a call and a result (see
 [Serialization](serialization.md)), in `@sleepymug/tau/call`, which the package's main entry
-exports too, and which loads no TypeScript, so that a caller can use it wherever it runs:
+exports too:
 
 ```ts
 import { applyResult, packCall, packResult, placeCall, readCall } from "@sleepymug/tau/call";
@@ -118,8 +123,7 @@ the tau API's `run` as `runTau` on whatever runs the runs it starts (see
 [The tau API](tau-api.md)).
 
 What the library does not read, or check, is the runtime's or the author's to keep to the spec:
-the tau's skills, and the JavaScript of its packages.
+the tau's skills, its declarations and those of its packages, which the author's `tau check`
+type-checks (see [Development](development.md)), and the JavaScript of its packages.
 
-It checks declarations with TypeScript 6.0, against Node.js 24's types, both of which it pins, and
-the args with Ajv 8, against draft 2020-12: `loadApis` takes about 0.4 s for a tau, `loadExposed`
-about as long when the tau exposes packages of its own, and `checkImplementation` about 0.15 s.
+It checks the args with Ajv 8, against draft 2020-12, and loads no TypeScript.

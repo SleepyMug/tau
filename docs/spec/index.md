@@ -1,7 +1,8 @@
 # tau: Transportable Agent Unit
 
-A tau is an agent packaged as a directory. Like a program, it declares the APIs it needs, as
-TypeScript declarations, but never holds their implementations or any credentials. It also
+A tau is an agent packaged as a directory. Like a program, it names the APIs it needs, each a
+**contract**, a package of TypeScript declarations with a name and a version, of which it holds a
+copy, but never their implementations or any credentials. It also
 declares what it takes: **files**, the caller's files and directories, each saying whether the
 agent reads it, writes it, or both; and **args**, JSON that a JSON Schema describes.
 
@@ -25,6 +26,7 @@ This spec is the reference:
   - [Placeholders](placeholders.md): `${...}` in the prompt, the args and init, and what each
     becomes.
   - [APIs](apis.md): `api/`, what the agent's programs call.
+  - [Contracts](contracts.md): an API as it is published, its package, and its versions.
   - [Packages](packages.md): `node_modules/`, code of the tau's own, built on its APIs.
 - A run:
   - [Calls](calls.md): what a run takes: a path for each file, extra files, and the args; and
@@ -40,3 +42,5 @@ This spec is the reference:
   - [Serialization](serialization.md): a run's call and result as archives, to send elsewhere.
 - [Library](library.md): `@sleepymug/tau`, which reads and checks a tau for runtimes, and packs a
   run as a call and a result.
+- [Development](development.md): `@sleepymug/tau-dev`, the `tau` command, which checks a tau as its
+  author makes it, copies contracts into it, and checks contracts as their publishers make them.
