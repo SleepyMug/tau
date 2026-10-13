@@ -1,16 +1,35 @@
 {
   "name": "@sleepymug/tau",
   "version": "0.1.0",
-  "description": "tau (Transportable Agent Unit): agents as directories that declare the APIs they need",
+  "description": "tau (Transportable Agent Unit): a client for agents as a service. It checks a tau, a directory that packages an agent, and a call of it, and hands the run to a wire adaptor, which carries it to a backend; and an SDK for the backends that run them",
   "type": "module",
+  "bin": {
+    "tau": "dist/cli/main.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./call": {
-      "types": "./dist/call/index.d.ts",
-      "import": "./dist/call/index.js"
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./backend": {
+      "types": "./dist/backend/index.d.ts",
+      "import": "./dist/backend/index.js"
+    },
+    "./transfer": {
+      "types": "./dist/transfer/index.d.ts",
+      "import": "./dist/transfer/index.js"
+    },
+    "./wire-tar": {
+      "types": "./dist/wire-tar/index.d.ts",
+      "import": "./dist/wire-tar/index.js"
+    },
+    "./adaptors": {
+      "types": "./dist/adaptors/index.d.ts",
+      "import": "./dist/adaptors/index.js"
     },
     "./TAU.md": "./TAU.md"
   },

@@ -1,24 +1,22 @@
-export {
-	API_SCOPE,
-	type Api,
-	type Contract,
-	type Exposed,
-	parseVersion,
-	readContract,
-	serves,
-} from "./tau/apis.js";
+/**
+ * `@sleepymug/tau`: the client SDK (docs/spec/client.md). It checks a tau and a call where the
+ * caller is, and hands the run to a wire adaptor, which carries it to a backend and puts what comes
+ * back at the caller's paths.
+ */
+export * from "./client/index.js";
+export { createDummyAdaptor, type DummyAgent, type DummyOptions, type DummyRun } from "./adaptors/index.js";
 export {
 	type CallFile,
-	type CheckedCall,
-	checkInputs,
-	checkOutputs,
+	type Delivery,
+	type Envelope,
 	type FileDeclaration,
+	type Job,
 	type Json,
 	type Kind,
-	loadTau,
 	type Mode,
-	type Expanded,
+	type Outcome,
+	type Report,
 	type ResolvedCall,
 	type Tau,
-} from "./tau/tau.js";
-export * from "./call/index.js";
+	loadTau,
+} from "./core/index.js";

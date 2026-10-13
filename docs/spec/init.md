@@ -28,4 +28,4 @@ How it exits says what comes next, each code named in the tau API:
   the agent runs on the prompt, which the runtime tells that init failed, with what init wrote to
   stdout and stderr.
 
-A run cancelled while init runs fails, as one cancelled while the agent works does.
+A run released while init runs is stopped, as one released while the agent works is.

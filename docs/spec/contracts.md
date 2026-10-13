@@ -71,10 +71,6 @@ The patch never matters, so a contract's publisher keeps to this:
 
 ## Contracts of tau's own
 
-The tau API, `@sleepymug/tau-api` (see [The tau API](tau-api.md)), is a contract, as is each of
-those this repository publishes in `contracts/`, for the domains taus often need and as examples:
-
-| Contract | What it is |
-|---|---|
-| `@sleepymug/tau-api` | The run's files and args, runs of other taus, and init's exit codes. |
-| `@sleepymug/tau-api-notes` | A notebook of short notes, each with tags to find them by later, which persist. |
+The tau API, `@sleepymug/tau-api` (see [The tau API](tau-api.md)), is a contract, which this
+repository publishes in `contracts/tau-api/`: the run's files and args, runs of other taus, and
+init's exit codes.

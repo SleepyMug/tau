@@ -1,12 +1,18 @@
 # Serialization
 
-A run can travel as bytes, to a runtime on another machine and back, in two formats: a **call**,
-the call's args and the content of the files the agent reads, and a **result**, how the run ended
-and the content the agent left at its `out` and `inout` files. Each stands alone: a result is read
-without its call. A call may carry the tau it runs, for a runtime that does not have it otherwise;
-a result never does.
+How a wire adaptor carries a run to its backend, and back, is its own (see
+[Protocol](protocol.md)). This is one way, which `@sleepymug/tau/wire-tar` writes and reads, and
+the dummy adaptor uses: a **call**, its envelope, the tau and the content of the files the agent
+reads, and a **result**, its report and the content the agent left at its `out` and `inout` files,
+each as a tar archive. Each stands alone: a result is read without its call. A call always carries
+the tau it runs; a result never does.
 
 Each is an **archive**, written and read in one pass, so a large file never has to be held whole.
+`packCall(job)` writes a call from the caller's paths; `unpackCall(bytes, { tau, place })` reads
+one, the tau first, at `tau`, then asks `place`, which may refuse the call, where each file goes,
+before it reads any file's content; `packResult(report, sources)` writes a result from where the
+agent left each output; and `unpackResult(bytes, delivery)` reads one, and puts its outputs at the
+caller's paths as the transfer helpers' `deliver` does (see [Protocol](protocol.md#transfer)).
 
 ## Archives
 
@@ -33,8 +39,8 @@ Compressing the archive, as a whole, is up to whatever carries it.
 
 ## Calls
 
-`call.json` holds the call's files, under `files`, its args, under `args`, and, under `tau`, `true`
-when the call carries its tau, and no other key:
+`call.json` holds the call's envelope (see [Protocol](protocol.md#what-travels)), its files, under
+`files`, and its args, under `args`, and no other key:
 
 ```json
 {
@@ -43,8 +49,7 @@ when the call carries its tau, and no other key:
     "site":   { "mode": "inout", "kind": "dir",  "base": "site" },
     "counts": { "mode": "out",                   "base": "counts.txt" }
   },
-  "args": { "top": 10 },
-  "tau": true
+  "args": { "top": 10 }
 }
 ```
 
@@ -59,9 +64,9 @@ when the call carries its tau, and no other key:
   content in the archive, at `files/<name>`; an `out` has none, since what its place holds at
   first is not specified.
 - `args` are the call's args, as the caller gave them, their placeholders not yet expanded.
-- The tau, when the call carries it, is the directory at `tau/`, as [Directory](directory.md) has
-  it, whose symlinks lead inside it. It may come first, so that a runtime can read the tau, and
-  check the call against it, before it reads the files.
+- The tau is the directory at `tau/`, as [Directory](directory.md) has it, whose symlinks lead
+  inside it. It comes first, so that the backend can read the tau, and check the call against it,
+  before it reads the files.
 
 Every content in the archive is a file's that `files` names with content, or the tau's.
 

@@ -6,8 +6,9 @@ copy, but never their implementations or any credentials. It also
 declares what it takes: **files**, the caller's files and directories, each saying whether the
 agent reads it, writes it, or both; and **args**, JSON that a JSON Schema describes.
 
-A **runtime**, such as pi-run, runs a tau for a **caller**, who gives a path for each file, and
-may give more files, and the args. The **agent**, the model the runtime runs on the tau's prompt, writes **programs** that
+A **runtime** runs a tau for a **caller**, who gives a path for each file, and may give more
+files, and the args: a **client** where the caller is, which checks the run, and whose **wire
+adaptor** carries it to a **backend**, which runs the agent (see [Protocol](protocol.md)). The **agent**, the model the runtime runs on the tau's prompt, writes **programs** that
 call the APIs, each through the runtime's implementation.
 
 This spec defines a **compiled format**: a tau as runtimes read and run it, as a built package is
@@ -39,8 +40,10 @@ This spec is the reference:
   - [Runtimes](runtimes.md): how the agent runs programs, and what a runtime presents to the model.
   - [The tau API](tau-api.md): how the agent's programs read the run's files and args, and run
     other taus.
-  - [Serialization](serialization.md): a run's call and result as archives, to send elsewhere.
-- [Library](library.md): `@sleepymug/tau`, which reads and checks a tau for runtimes, and packs a
-  run as a call and a result.
-- [Development](development.md): `@sleepymug/tau-dev`, the `tau` command, which checks a tau as its
-  author makes it, copies contracts into it, and checks contracts as their publishers make them.
+- The runtime:
+  - [Protocol](protocol.md): the client, its wire adaptors, and the backend; what is modelled
+    between them, a run's life, and the modules of `@sleepymug/tau`.
+  - [Client](client.md): the client SDK, its wire adaptors, and the `tau` command.
+  - [Backend](backend.md): the backend SDK, for backends.
+  - [Serialization](serialization.md): a run's call and result as tar archives, one way to carry
+    them.

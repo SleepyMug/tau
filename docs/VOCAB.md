@@ -1,7 +1,7 @@
 # Vocabulary
 
 The names tau gives things, what each means, and the names it no longer uses. [TAU.md](../TAU.md),
-the [spec](spec/index.md) and the library use these, and no others.
+the [spec](spec/index.md) and the code use these, and no others.
 
 ## A tau
 
@@ -35,7 +35,7 @@ the [spec](spec/index.md) and the library use these, and no others.
 
 | Name | What it is |
 |---|---|
-| **runtime** | What runs a tau, such as pi-run or fleet. |
+| **runtime** | What runs a tau: a client, with its wire adaptor, and a backend, together. |
 | **caller** | Who runs a tau: a person, a program, or another agent. |
 | **agent** | The model the runtime runs on the tau's prompt. |
 | **program** | Code the agent runs with `node`, importing what the tau exposes. |
@@ -51,7 +51,26 @@ the [spec](spec/index.md) and the library use these, and no others.
 | **result** | How a run ended: whether it succeeded, its final text, and why it failed, if it did. |
 | **outputs** | What a run leaves at its `out` and `inout` files' places, which the caller's paths hold once it succeeds. |
 | **targets** | The caller's paths of a run's `out` and `inout` files, by name, where its outputs go. |
-| **archive** | A call or a result as a tar file, to send elsewhere: its JSON, then the tau, and each file's content under its name. |
+| **archive** | A call or a result as a tar file, one way to carry it: its JSON, then the tau, and each file's content under its name. |
+
+## The runtime
+
+| Name | What it is |
+|---|---|
+| **client** | What runs a tau where the caller is, the `tau` command or the client SDK: it checks the tau, the call and the paths, and hands the run to a wire adaptor. |
+| **wire adaptor** | The part of the client that talks to one backend, given to it by name: it packages a run, carries it, checks what comes back, and puts the outputs at the targets. |
+| **dummy adaptor** | The wire adaptor built in for now: a loopback to a **dummy backend** of its own, in the client's process. |
+| **backend** | What runs the agent, wherever it is, with the backend SDK. |
+| **backend SDK** | What every backend does alike: **admit** a call, check its files once **placed**, **render** what the agent is given, and **collect** the run's report. |
+| **job** | A run as the client hands it to its adaptor: its envelope, the tau's directory, and the paths of its inputs. |
+| **delivery** | Where the client asks its adaptor to put a run's outputs: the run's files, and their targets. |
+| **envelope** | A call, checked, without the caller's paths: each file's mode, base name and kind, and the args. |
+| **report** | How a run ended, and the kind of each output it gives back. |
+| **submit**, **finish**, **release** | A run's life, the whole contract of a wire adaptor and its backend: hand it over; have its latest result put at the targets, as often as asked; drop it, stopping it if it has not ended. |
+| **wait** | The client's verb, in the SDK and the `tau` command: finish, then release; no adaptor or backend sees it. |
+| **content** | A file or a directory as a stream of entries, which the transfer helpers read, check and make: the tau's, an input's, or an output's. |
+| **run store** | Where the client keeps each run it started, by its id, until it is released: its adaptor, its files, and its targets. |
+| **implementation catalog** | Where a backend finds the implementation that serves each API. |
 
 ## Names no longer used
 
@@ -63,8 +82,13 @@ the [spec](spec/index.md) and the library use these, and no others.
 | type, `text`, `list`, `record`, `of`, `fields` | A file's kind and mode, or the schema: JSON Schema's `string`, `array` and `object`. |
 | `path`, as a kind | A file declared without a kind. |
 | JSON Pointer, blob id | A file's name, which keys outputs and names content in an archive. |
-| `bind`, `BoundFile`, `Placing`, a file's `host` and `view` | `resolve`, a call on the caller's side, with its paths; `check`, an archive's call on the runtime's; `expand`, with each file's place. |
+| `bind`, `BoundFile`, `Placing`, a file's `host` and `view` | `resolve`, a call on the caller's side, with its paths; `check`, an envelope on the backend's; `expand`, with each file's place. |
 | an API's name, an API declared for its tau, which may declare less than an implementation | An alias, and the contract the tau holds a copy of, whole: packages of the tau's own, and `exposes`, shape what the model sees. |
-| an implementation that fits an API, `checkImplementation`, `loadApis`, `loadExposed` | One of the API's contract, at a version that serves the tau's copy, matched by name and version; `loadTau` reads the APIs and what the tau exposes, and `tau check` type-checks them. |
+| an implementation that fits an API, `checkImplementation`, `loadApis`, `loadExposed` | One of the API's contract, at a version that serves the tau's copy, matched by name and version; `loadTau` reads the APIs and what the tau exposes. |
+| the library, `Runtime`, `runTau`, `placeCall`, `applyResult`, `CheckedCall`, `call.json`'s `tau` | The client and its wire adaptors, `client.run`, the backend SDK's `admit` and `place`, an adaptor's `finish`; an envelope, which always comes with its tau. |
+| backend, as the client's link; remote service; server SDK | A wire adaptor; a backend; the backend SDK. |
+| parcel, a call or a result as JSON with its contents | An envelope or a report, and the paths of a job or a delivery: contents are the adaptor's and the backend's, with the transfer helpers. |
+| cancel | Release, which stops a run that has not ended. |
+| `@sleepymug/tau-dev`: `tau check` type-checking a tau, `tau add`, `tau update`, `tau contract` | Nothing, for now: the `tau` command checks a tau without TypeScript. |
 | `@packageDocumentation`, as what describes an API or a package | Its `package.json`'s `description`. |
 | `at`, `share`, `role`, `vars`, `paths`; `args` as a positional list | Earlier designs: places were declared, then are the runtime's; `share` and `role` became modes; texts and paths became files and args. |
