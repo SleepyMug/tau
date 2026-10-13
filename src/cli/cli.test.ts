@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { createDummyAdaptor } from "../adaptors/dummy.js";
+import { FakeFleet } from "../adaptors/fleet-fake.test.util.js";
+import { listenFleet } from "../adaptors/fleet-socket.js";
 import { type CliContext, main } from "./cli.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-cli-"));
@@ -87,7 +89,7 @@ test("tau start gives a run's id, which later commands finish, as often as asked
 test("a wire adaptor is chosen by name, among those the command is given", async () => {
 	const unknown = await tau(["run", "greet", "--call", "call.json", "--adaptor", "elsewhere"]);
 	assert.equal(unknown.code, 1);
-	assert.equal(unknown.stderr, 'tau: no wire adaptor "elsewhere"; there are dummy\n');
+	assert.equal(unknown.stderr, 'tau: no wire adaptor "elsewhere"; there are dummy, fleet\n');
 	let stdout = "";
 	const context: CliContext = {
 		cwd: home,
@@ -100,6 +102,25 @@ test("a wire adaptor is chosen by name, among those the command is given", async
 	assert.equal(await main(["run", "greet", "--call", "call.json"], context), 0);
 	assert.equal(stdout, "");
 	assert.equal(readFileSync(path.join(home, "card.txt"), "utf8"), "Hi.\n");
+});
+
+test("tau run --adaptor fleet runs on the fleet service at $TAU_FLEET_SOCKET, its session in the working directory's workspace", async () => {
+	const fleet = new FakeFleet(async (placed) => (writeFileSync(placed.places.card as string, "From the fleet.\n"), { ok: true, text: "Sent." }));
+	const socket = path.join(tmp, "fleet.sock");
+	after(await listenFleet(socket, fleet.handle));
+	let stdout = "";
+	const context: CliContext = {
+		cwd: home,
+		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_FLEET_SOCKET: socket },
+		stdin: (async function* () {})(),
+		stdout: (text) => void (stdout += text),
+		stderr: () => {},
+	};
+	assert.equal(await main(["run", "greet", "--call", "call.json", "--adaptor", "fleet"], context), 0);
+	assert.equal(stdout, "Sent.\n");
+	assert.equal(readFileSync(path.join(home, "card.txt"), "utf8"), "From the fleet.\n");
+	assert.deepEqual(fleet.submitted, [{ op: "submit", title: "greet", project: home }]);
+	assert.equal(fleet.released.length, 1);
 });
 
 test("a command line that is not one gives the usage", async () => {

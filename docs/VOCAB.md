@@ -59,7 +59,9 @@ the [spec](spec/index.md) and the code use these, and no others.
 |---|---|
 | **client** | What runs a tau where the caller is, the `tau` command or the client SDK: it checks the tau, the call and the paths, and hands the run to a wire adaptor. |
 | **wire adaptor** | The part of the client that talks to one backend, given to it by name: it packages a run, carries it, checks what comes back, and puts the outputs at the targets. |
-| **dummy adaptor** | The wire adaptor built in for now: a loopback to a **dummy backend** of its own, in the client's process. |
+| **dummy adaptor** | A wire adaptor built in: a loopback to a **dummy backend** of its own, in the client's process. |
+| **fleet adaptor** | A wire adaptor built in: runs on the **fleet service**, deepseek-fleet's backend, each in a dsh session and a container of its own. |
+| **transport** | What carries the fleet adaptor's requests to the fleet service, and their answers back: its socket, a loopback in its process, or a relay. |
 | **backend** | What runs the agent, wherever it is, with the backend SDK. |
 | **backend SDK** | What every backend does alike: **admit** a call, check its files once **placed**, **render** what the agent is given, and **collect** the run's report. |
 | **job** | A run as the client hands it to its adaptor: its envelope, the tau's directory, and the paths of its inputs. |

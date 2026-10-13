@@ -11,8 +11,9 @@ tau runs agents as a service. The **runtime** this spec speaks of is two parts, 
   [Client](client.md)). It reads and checks the tau and the call, and the caller's paths, and hands
   the run to one of its **wire adaptors**, each the part of the client that talks to one backend,
   chosen by name among those the client is given. An adaptor packages the tau and the files,
-  carries them, and puts the outputs at the caller's paths. The adaptors there are are built in,
-  the **dummy** adaptor among them, whose backend is its own, in the client's process.
+  carries them, and puts the outputs at the caller's paths. The adaptors there are are built in:
+  the **dummy** adaptor, whose backend is its own, in the client's process, and the **fleet**
+  adaptor, whose backend is the fleet service (see [The fleet adaptor](fleet.md)).
 - The **backend** runs the agent. The backend SDK (see [Backend](backend.md)) does for it what this
   spec asks of every backend alike: it admits a call, checks its files once placed, renders what
   the agent is given, and collects the run's report. Where and how the agent runs, the model, its
@@ -136,7 +137,7 @@ uses as arguments, never loading it by name:
 | `backend` (`@sleepymug/tau/backend`) | The backend SDK, and the implementation catalog it takes | `core` |
 | `transfer` (`@sleepymug/tau/transfer`) | Contents, and delivery, for adaptors and backends | `core` |
 | `wire-tar` (`@sleepymug/tau/wire-tar`) | Calls and results as tar archives | `core`, `transfer` |
-| `adaptors` (`@sleepymug/tau/adaptors`) | The built-in wire adaptors: `dummy` | any of the above |
+| `adaptors` (`@sleepymug/tau/adaptors`) | The built-in wire adaptors: `dummy`, and `fleet`, with its transports | any of the above |
 | `cli` | The `tau` command, which puts the client and its adaptors together | `core`, `client`, `adaptors` |
 
 Neither the client nor the backend SDK knows how files move.

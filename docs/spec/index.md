@@ -45,5 +45,6 @@ This spec is the reference:
     between them, a run's life, and the modules of `@sleepymug/tau`.
   - [Client](client.md): the client SDK, its wire adaptors, and the `tau` command.
   - [Backend](backend.md): the backend SDK, for backends.
+  - [The fleet adaptor](fleet.md): runs on the fleet service, and the transports that carry them.
   - [Serialization](serialization.md): a run's call and result as tar archives, one way to carry
     them.

@@ -61,6 +61,10 @@ at the caller's paths. A run ends before `submit` gives its id. By default, its 
 every API, and its agent, `echoAgent`, leaves an empty file or directory at each `out` file's
 place, and gives back the prompt, rendered, as its text: a dry run.
 
+The **fleet** adaptor, `createFleetAdaptor({ transport, project })`, carries a run to the fleet
+service, over the service's socket, `fleetSocket(path)`, or another transport (see
+[The fleet adaptor](fleet.md)).
+
 ## The `tau` command
 
 ```
@@ -78,4 +82,7 @@ A call is JSON, `{"files": {...}, "args": {...}}`: `--call <file>`, `-` for stdi
 `finish` and `wait` print the run's final text, and, when it failed, why, to stderr, exiting 1;
 `--json` prints `{ok, text, failure}` instead. The command keeps runs, and the dummy backend's
 results, in `$TAU_STATE_DIR`, by default `tau` in `$XDG_STATE_HOME`, or in `~/.local/state`. A run
-goes through `--adaptor`, or `$TAU_ADAPTOR`, or `dummy`.
+goes through `--adaptor`, or `$TAU_ADAPTOR`, or `dummy`: `dummy`, or `fleet`, the fleet service at
+its socket, `$TAU_FLEET_SOCKET` or in the dsh home, each run's session in the dsh workspace of the
+working directory. Interrupting `run` releases the run, which then fails; interrupting `finish` or
+`wait` stops the waiting, not the run.

@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { createDummyAdaptor } from "../adaptors/dummy.js";
+import { createFleetAdaptor } from "../adaptors/fleet.js";
+import { defaultFleetSocket, fleetSocket } from "../adaptors/fleet-socket.js";
 import type { WireAdaptor } from "../client/adaptor.js";
 import { createClient } from "../client/client.js";
 import { fileRunStore, type RunStore } from "../client/store.js";
@@ -27,6 +29,10 @@ const USAGE = [
 	"A call is JSON, {\"files\": {...}, \"args\": {...}}: --call <file>, - for stdin, or --call-json '<json>'.",
 	"Its paths are relative to the working directory. Without one, the call is {}.",
 	"--json prints how the run ended, {ok, text, failure}, as JSON.",
+	"",
+	"A run goes through --adaptor, or $TAU_ADAPTOR, or dummy: dummy, a dry run in this process, or fleet,",
+	"the fleet service, at $TAU_FLEET_SOCKET, or fleet/tau.sock in the dsh home. Interrupting run releases",
+	"the run; interrupting finish or wait stops the waiting.",
 ].join("\n");
 
 /** What the command reads and writes, and what it runs on. */
@@ -40,6 +46,8 @@ export interface CliContext {
 	readonly adaptors?: { readonly [name: string]: WireAdaptor };
 	/** Where runs are kept between commands; by default files in the state directory. */
 	readonly runs?: RunStore;
+	/** Aborted when the command is interrupted: a run started by `run` is released, and `finish` and `wait` stop waiting. */
+	readonly signal?: AbortSignal;
 }
 
 /** Where the command keeps its state: `$TAU_STATE_DIR`, or `tau` in `$XDG_STATE_HOME`, or in `~/.local/state`. */
@@ -48,9 +56,15 @@ export function stateDir(env: CliContext["env"]): string {
 	return path.join(env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "tau");
 }
 
-/** The wire adaptors built into tau, each made here, none loaded by name. */
-export function defaultAdaptors(state: string): { readonly [name: string]: WireAdaptor } {
-	return { dummy: createDummyAdaptor({ spool: path.join(state, "dummy") }) };
+/**
+ * The wire adaptors built into tau, each made here, none loaded by name: `dummy`, and `fleet`, at
+ * the fleet service's socket, its runs' sessions in the dsh workspace of `cwd`.
+ */
+export function defaultAdaptors(state: string, env: CliContext["env"], cwd: string): { readonly [name: string]: WireAdaptor } {
+	return {
+		dummy: createDummyAdaptor({ spool: path.join(state, "dummy") }),
+		fleet: createFleetAdaptor({ transport: fleetSocket(defaultFleetSocket(env)), project: path.resolve(cwd) }),
+	};
 }
 
 /** Run the command line `argv`, without the program; gives its exit code. */
@@ -76,12 +90,13 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 	const state = stateDir(context.env);
 	try {
 		const client = createClient({
-			adaptors: context.adaptors ?? defaultAdaptors(state),
+			adaptors: context.adaptors ?? defaultAdaptors(state, context.env, context.cwd),
 			adaptor: values.adaptor ?? context.env.TAU_ADAPTOR ?? "dummy",
 			runs: context.runs ?? fileRunStore(path.join(state, "runs")),
 		});
 		const dir = path.resolve(context.cwd, target);
 		const call = async (): Promise<unknown> => readCall(values, context);
+		const signal = context.signal === undefined ? {} : { signal: context.signal };
 		const ended = (outcome: Outcome): number => {
 			if (values.json === true) context.stdout(`${JSON.stringify(outcome)}\n`);
 			else {
@@ -102,14 +117,14 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 				context.stdout(`${JSON.stringify(describe(dir), undefined, 2)}\n`);
 				return 0;
 			case "run":
-				return ended(await client.run(dir, await call(), { cwd: context.cwd }));
+				return ended(await client.run(dir, await call(), { cwd: context.cwd, ...signal }));
 			case "start":
 				context.stdout(`${await client.start(dir, await call(), { cwd: context.cwd })}\n`);
 				return 0;
 			case "finish":
-				return ended(await client.finish(target));
+				return ended(await client.finish(target, signal));
 			case "wait":
-				return ended(await client.wait(target));
+				return ended(await client.wait(target, signal));
 			default:
 				await client.release(target);
 				return 0;
