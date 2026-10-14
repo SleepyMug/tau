@@ -31,12 +31,14 @@
       "types": "./dist/adaptors/index.d.ts",
       "import": "./dist/adaptors/index.js"
     },
-    "./TAU.md": "./TAU.md"
+    "./TAU.md": "./TAU.md",
+    "./TAU_DEV.md": "./TAU_DEV.md"
   },
   "files": [
     "dist",
     "!dist/**/*.test.*",
     "TAU.md",
+    "TAU_DEV.md",
     "docs/spec",
     "docs/VOCAB.md"
   ],

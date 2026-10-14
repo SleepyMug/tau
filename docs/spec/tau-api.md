@@ -8,7 +8,7 @@ convention at `api/tau/` (see [APIs](apis.md)), and a runtime that implements it
 implementation (see [Implementations](implementations.md)):
 - `files()`, where this agent sees each of the run's files, by name, extra files included;
 - `args()`, the run's args, their placeholders expanded (see [Placeholders](placeholders.md));
-- `run(agent, call, signal)`, which runs the tau at `agent`, a directory, with `call`, as
+- `run(tau, call, signal)`, which runs the tau at `tau`, a directory, with `call`, as
   [Calls](calls.md) has it, and resolves to how the run ended, as [Results](results.md) has it;
 - `TAU_SKIP`, `TAU_RUN` and `TAU_FALLBACK`, init's exit codes.
 

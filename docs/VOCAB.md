@@ -1,13 +1,13 @@
 # Vocabulary
 
 The names tau gives things, what each means, and the names it no longer uses. [TAU.md](../TAU.md),
-the [spec](spec/index.md) and the code use these, and no others.
+[TAU_DEV.md](../TAU_DEV.md), the [spec](spec/index.md) and the code use these, and no others.
 
 ## A tau
 
 | Name | What it is |
 |---|---|
-| **tau** | An agent packaged as a directory: Transportable Agent Unit. Written TAU where a model reads it, as in TAU.md. |
+| **tau** | An agent packaged as a directory: Transportable Agent Unit. Written TAU where a model reads it, as in TAU.md and TAU_DEV.md. |
 | **prompt** | `PROMPT.md`, what the agent is asked, with its placeholders. |
 | **metadata** | `tau.json`: the tau's description, files, args, what it exposes, and its init. |
 | **file** | A file or a directory of the caller's that the tau takes, by its **name**, which `files` in `tau.json` declares, with its mode, its kind and a description, as what the prompt and init need. A file of kind `dir` is a directory: file as Unix means it. Files do not nest. |

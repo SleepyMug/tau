@@ -6,8 +6,9 @@ TypeScript declarations. The `tau` command, or the client SDK, checks a tau and 
 the caller is, and hands the run to a **wire adaptor**, which carries it to a **backend** that runs
 the agent with the **backend SDK**, and puts what comes back at the caller's paths.
 
-- [TAU.md](TAU.md): taus in brief: their layout, and what a run means. The package exports it as
-  `@sleepymug/tau/TAU.md`, for a backend to give its agents.
+- [TAU.md](TAU.md): taus in brief, for a model: what one takes, and what a run of one promises;
+  and [TAU_DEV.md](TAU_DEV.md): how to make one. The package exports them as
+  `@sleepymug/tau/TAU.md` and `@sleepymug/tau/TAU_DEV.md`, for a runtime to give its agents.
 - [docs/spec/](docs/spec/index.md): the spec; [protocol.md](docs/spec/protocol.md) has the parts
   of the runtime, and the modules.
 - [docs/VOCAB.md](docs/VOCAB.md): the names of things, and those no longer used.

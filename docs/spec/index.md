@@ -16,7 +16,8 @@ what gets installed, not the sources it is built from. A tau holds everything it
 or a skill that two taus share is a copy in each. A source format, in which taus could share such
 parts and from which they would be built into this one, is a work in progress.
 
-[TAU.md](../../TAU.md) introduces taus in brief, and [VOCAB.md](../VOCAB.md) names their parts.
+[TAU.md](../../TAU.md) introduces taus in brief, what one takes and what a run promises,
+[TAU_DEV.md](../../TAU_DEV.md) how to make one, and [VOCAB.md](../VOCAB.md) names their parts.
 This spec is the reference:
 
 - The tau:
