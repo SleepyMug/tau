@@ -11,6 +11,7 @@ import { fileRunStore, type RunStore } from "../client/store.js";
 import type { Outcome } from "../core/model.js";
 import { loadTau } from "../core/tau.js";
 import { messageOf } from "../core/util.js";
+import { type CliConfig, configFile, loadConfig } from "./config.js";
 
 /** The `tau` command (docs/spec/client.md#the-tau-command). */
 
@@ -30,9 +31,14 @@ const USAGE = [
 	"Its paths are relative to the working directory. Without one, the call is {}.",
 	"--json prints how the run ended, {ok, text, failure}, as JSON.",
 	"",
-	"A run goes through --adaptor, or $TAU_ADAPTOR, or dummy: dummy, a dry run in this process, or fleet,",
-	"the fleet service, at $TAU_FLEET_SOCKET, or fleet/tau.sock in the dsh home. Interrupting run releases",
-	"the run; interrupting finish or wait stops the waiting.",
+	"A run goes through --adaptor, or $TAU_ADAPTOR, or the config's adaptor, or dummy: dummy, a dry run in",
+	"this process, or fleet, the fleet service, at $TAU_FLEET_SOCKET, or the config's, or fleet/tau.sock in",
+	"the dsh home. Interrupting run releases the run; interrupting finish or wait stops the waiting.",
+	"",
+	"The config is YAML, at $TAU_CONFIG, or tau/config.yaml in $XDG_CONFIG_HOME, or in ~/.config:",
+	"  adaptor: fleet",
+	"  adaptors:",
+	"    fleet: { socket: ~/.dsh/fleet/tau.sock }",
 ].join("\n");
 
 /** What the command reads and writes, and what it runs on. */
@@ -58,12 +64,15 @@ export function stateDir(env: CliContext["env"]): string {
 
 /**
  * The wire adaptors built into tau, each made here, none loaded by name: `dummy`, and `fleet`, at
- * the fleet service's socket, its runs' sessions in the dsh workspace of `cwd`.
+ * the fleet service's socket, `$TAU_FLEET_SOCKET`, or the config's, or the dsh home's, its runs'
+ * sessions in the dsh workspace of `cwd`.
  */
-export function defaultAdaptors(state: string, env: CliContext["env"], cwd: string): { readonly [name: string]: WireAdaptor } {
+export function defaultAdaptors(state: string, env: CliContext["env"], cwd: string, config: CliConfig = { adaptors: {} }): { readonly [name: string]: WireAdaptor } {
+	const configured = config.adaptors.fleet?.socket;
+	const socket = (env.TAU_FLEET_SOCKET ?? "").trim() === "" && configured !== undefined ? configured : defaultFleetSocket(env);
 	return {
 		dummy: createDummyAdaptor({ spool: path.join(state, "dummy") }),
-		fleet: createFleetAdaptor({ transport: fleetSocket(defaultFleetSocket(env)), project: path.resolve(cwd) }),
+		fleet: createFleetAdaptor({ transport: fleetSocket(socket), project: path.resolve(cwd) }),
 	};
 }
 
@@ -89,9 +98,10 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 	}
 	const state = stateDir(context.env);
 	try {
+		const config = await loadConfig(configFile(context.env));
 		const client = createClient({
-			adaptors: context.adaptors ?? defaultAdaptors(state, context.env, context.cwd),
-			adaptor: values.adaptor ?? context.env.TAU_ADAPTOR ?? "dummy",
+			adaptors: context.adaptors ?? defaultAdaptors(state, context.env, context.cwd, config),
+			adaptor: values.adaptor ?? context.env.TAU_ADAPTOR ?? config.adaptor ?? "dummy",
 			runs: context.runs ?? fileRunStore(path.join(state, "runs")),
 		});
 		const dir = path.resolve(context.cwd, target);

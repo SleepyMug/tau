@@ -82,7 +82,26 @@ A call is JSON, `{"files": {...}, "args": {...}}`: `--call <file>`, `-` for stdi
 `finish` and `wait` print the run's final text, and, when it failed, why, to stderr, exiting 1;
 `--json` prints `{ok, text, failure}` instead. The command keeps runs, and the dummy backend's
 results, in `$TAU_STATE_DIR`, by default `tau` in `$XDG_STATE_HOME`, or in `~/.local/state`. A run
-goes through `--adaptor`, or `$TAU_ADAPTOR`, or `dummy`: `dummy`, or `fleet`, the fleet service at
-its socket, `$TAU_FLEET_SOCKET` or in the dsh home, each run's session in the dsh workspace of the
-working directory. Interrupting `run` releases the run, which then fails; interrupting `finish` or
-`wait` stops the waiting, not the run.
+goes through `--adaptor`, or `$TAU_ADAPTOR`, or the config file's `adaptor`, or `dummy`: `dummy`, or
+`fleet`, the fleet service at its socket, `$TAU_FLEET_SOCKET`, or the config file's, or in the dsh
+home, each run's session in the dsh workspace of the working directory. Interrupting `run` releases
+the run, which then fails; interrupting `finish` or `wait` stops the waiting, not the run.
+
+### The config file
+
+The command reads its config file, YAML, at `$TAU_CONFIG`, or `tau/config.yaml` in
+`$XDG_CONFIG_HOME`, or in `~/.config`. None there, or an empty one, says nothing; one with anything
+else in it than the following fails every command, saying where and why:
+
+```yaml
+# The adaptor a run goes through, unless --adaptor or $TAU_ADAPTOR names one.
+adaptor: fleet
+# The options of the adaptors built into tau, each optional.
+adaptors:
+  fleet:
+    # The fleet service's socket, unless $TAU_FLEET_SOCKET names one: relative to the file's
+    # folder, a leading ~ the user's home.
+    socket: ~/.dsh/fleet/tau.sock
+```
+
+The command line comes first, then the environment, then the file, then the defaults.

@@ -52,8 +52,10 @@ request: it is no field of the wire.
 ## The socket
 
 The service listens on a Unix socket, which only its owner can open, its authentication:
-`$TAU_FLEET_SOCKET`, or `fleet/tau.sock` in the dsh home, `$DSH_HOME` or `~/.dsh`
-(`defaultFleetSocket`). Each connection carries one request:
+`$TAU_FLEET_SOCKET`, or, for the `tau` command, the one its config file names (see
+[The config file](client.md#the-config-file)), or `fleet/tau.sock` in the dsh home, `$DSH_HOME` or
+`~/.dsh` (`defaultFleetSocket`, which has all but the config file's). Each connection carries one
+request:
 
 - The client sends the request as one line of JSON, with `protocol`, the wire's version, `1`, and,
   when bytes follow it, `body: true`; then the bytes, up to the end of what it sends.

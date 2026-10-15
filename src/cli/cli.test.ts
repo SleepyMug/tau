@@ -36,7 +36,7 @@ async function tau(argv: readonly string[], stdin = ""): Promise<{ code: number;
 	let stderr = "";
 	const context: CliContext = {
 		cwd: home,
-		env: { TAU_STATE_DIR: path.join(tmp, "state") },
+		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(tmp, "no-config.yaml") },
 		stdin: (async function* () { yield stdin; })(),
 		stdout: (text) => void (stdout += text),
 		stderr: (text) => void (stderr += text),
@@ -93,7 +93,7 @@ test("a wire adaptor is chosen by name, among those the command is given", async
 	let stdout = "";
 	const context: CliContext = {
 		cwd: home,
-		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_ADAPTOR: "quiet" },
+		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(tmp, "no-config.yaml"), TAU_ADAPTOR: "quiet" },
 		stdin: (async function* () {})(),
 		stdout: (text) => void (stdout += text),
 		stderr: () => {},
@@ -111,7 +111,7 @@ test("tau run --adaptor fleet runs on the fleet service at $TAU_FLEET_SOCKET, it
 	let stdout = "";
 	const context: CliContext = {
 		cwd: home,
-		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_FLEET_SOCKET: socket },
+		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(tmp, "no-config.yaml"), TAU_FLEET_SOCKET: socket },
 		stdin: (async function* () {})(),
 		stdout: (text) => void (stdout += text),
 		stderr: () => {},
@@ -121,6 +121,80 @@ test("tau run --adaptor fleet runs on the fleet service at $TAU_FLEET_SOCKET, it
 	assert.equal(readFileSync(path.join(home, "card.txt"), "utf8"), "From the fleet.\n");
 	assert.deepEqual(fleet.submitted, [{ op: "submit", title: "greet", project: home }]);
 	assert.equal(fleet.released.length, 1);
+});
+
+test("the config file chooses the adaptor, and the fleet service's socket, a path relative to its folder; the command line and the environment come first", async () => {
+	const fleet = new FakeFleet(async (placed) => (writeFileSync(placed.places.card as string, "Configured.\n"), { ok: true, text: "Sent." }));
+	const configDir = write("config", { "config.yaml": "# Runs go to the fleet.\nadaptor: fleet\nadaptors:\n  fleet:\n    socket: sockets/fleet.sock\n" });
+	mkdirSync(path.join(configDir, "sockets"));
+	after(await listenFleet(path.join(configDir, "sockets", "fleet.sock"), fleet.handle));
+	const run = async (env: CliContext["env"], argv: readonly string[] = []): Promise<number> =>
+		main(["run", "greet", "--call", "call.json", ...argv], {
+			cwd: home,
+			env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(configDir, "config.yaml"), ...env },
+			stdin: (async function* () {})(),
+			stdout: () => {},
+			stderr: () => {},
+		});
+	assert.equal(await run({}), 0);
+	assert.equal(readFileSync(path.join(home, "card.txt"), "utf8"), "Configured.\n");
+	assert.equal(fleet.submitted.length, 1);
+	// --adaptor, and $TAU_ADAPTOR, before the config's adaptor.
+	assert.equal(await run({}, ["--adaptor", "dummy"]), 0);
+	assert.equal(await run({ TAU_ADAPTOR: "dummy" }), 0);
+	assert.equal(fleet.submitted.length, 1);
+	// $TAU_FLEET_SOCKET before the config's socket.
+	assert.equal(await run({ TAU_FLEET_SOCKET: path.join(tmp, "nothing.sock") }), 1);
+	assert.equal(fleet.submitted.length, 1);
+});
+
+test("a config file that is not one fails the command, saying where and why", async () => {
+	const cases: [string, RegExp][] = [
+		["adaptor: fleet\nsocket: x\n", /config\.yaml: it has no "socket"; it has adaptor, adaptors\n$/u],
+		["adaptors:\n  dummy: {}\n", /config\.yaml: adaptors has no "dummy"; it has fleet\n$/u],
+		["adaptors:\n  fleet: { socket: 3 }\n", /config\.yaml: adaptors\.fleet\.socket is not a path\n$/u],
+		["adaptor: [fleet]\n", /config\.yaml: adaptor is not a name\n$/u],
+		["- fleet\n", /config\.yaml: it is not a mapping\n$/u],
+		["adaptor: : :\n", /config\.yaml: /u],
+	];
+	for (const [text, expected] of cases) {
+		const dir = write("broken", { "config.yaml": text });
+		let stderr = "";
+		const code = await main(["check", "greet"], {
+			cwd: home,
+			env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(dir, "config.yaml") },
+			stdin: (async function* () {})(),
+			stdout: () => {},
+			stderr: (text) => void (stderr += text),
+		});
+		assert.equal(code, 1, text);
+		assert.match(stderr, expected, text);
+		assert.ok(stderr.startsWith(`tau: the config ${dir}/config.yaml: `), stderr);
+	}
+});
+
+test("a config file is found in $XDG_CONFIG_HOME, and an empty one says nothing", async () => {
+	const xdg = write("xdg", { "tau/config.yaml": "" });
+	let stdout = "";
+	const code = await main(["run", "greet", "--call", "call.json"], {
+		cwd: home,
+		env: { TAU_STATE_DIR: path.join(tmp, "state"), XDG_CONFIG_HOME: xdg },
+		stdin: (async function* () {})(),
+		stdout: (text) => void (stdout += text),
+		stderr: () => {},
+	});
+	assert.equal(code, 0);
+	assert.match(stdout, /^Greet Ana in /u);
+	writeFileSync(path.join(xdg, "tau", "config.yaml"), "adaptor: elsewhere\n");
+	let stderr = "";
+	assert.equal(await main(["run", "greet", "--call", "call.json"], {
+		cwd: home,
+		env: { TAU_STATE_DIR: path.join(tmp, "state"), XDG_CONFIG_HOME: xdg },
+		stdin: (async function* () {})(),
+		stdout: () => {},
+		stderr: (text) => void (stderr += text),
+	}), 1);
+	assert.equal(stderr, 'tau: no wire adaptor "elsewhere"; there are dummy, fleet\n');
 });
 
 test("a command line that is not one gives the usage", async () => {
