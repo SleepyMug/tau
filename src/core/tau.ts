@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { API_SCOPE, type Api, type Exposed, readApis, readExposed } from "./apis.js";
+import { type Api, apisOf, type Exposed, readExposed } from "./apis.js";
 import { checkEnvelope, type Declared, resolveCall, scopeOfCall } from "./call.js";
 import { linkProblems } from "./links.js";
 import { readMetadata } from "./metadata.js";
@@ -26,7 +26,7 @@ export interface Tau {
 	readonly files: { readonly [name: string]: FileDeclaration };
 	/** The schema of the args, a JSON Schema (draft 2020-12) of an object; undefined when the tau takes none. */
 	readonly args: { readonly [keyword: string]: Json } | undefined;
-	/** Its APIs, each a copy of a contract in `api/<alias>/`, in the order of their aliases. */
+	/** Its APIs, each a contract's name and a range, as `apis` in tau.json names them, in the order of their names. */
 	readonly apis: readonly Api[];
 	/**
 	 * What the agent's programs import, in the order tau.json's `exposes` lists it: an API, or a
@@ -76,8 +76,8 @@ export interface Expanded {
  * files and no args). Throws, naming the file and the reason, when tau.json breaks the spec or the
  * prompt names what it cannot, and, listing every one, for a symlink that breaks the spec in what a
  * runtime reads, node_modules/ included when the tau exposes a package of its own, and then for
- * APIs and what the tau exposes that break the spec. It type-checks neither the APIs nor the
- * packages, and loads no TypeScript.
+ * what the tau exposes that breaks the spec, its packages' APIs included. It reads nothing of
+ * `.tau/`, type-checks neither the APIs nor the packages, and loads no TypeScript.
  */
 export function loadTau(dir: string): Tau {
 	const absolute = path.resolve(dir);
@@ -85,7 +85,7 @@ export function loadTau(dir: string): Tau {
 	if (!existsSync(promptFile)) throw new Error(`${absolute}: not a tau (no PROMPT.md)`);
 	const metadataFile = path.join(absolute, "tau.json");
 	const metadata = existsSync(metadataFile) ? readMetadata(metadataFile) : undefined;
-	const { description, files = {}, args, validate, exposes, init } = metadata ?? {};
+	const { description, files = {}, args, validate, apis: named, exposes, init } = metadata ?? {};
 	const declared: Declared = {
 		files,
 		declaredArgs: new Set(Object.keys(isObject(args?.properties) ? args.properties : {})),
@@ -108,10 +108,10 @@ export function loadTau(dir: string): Tau {
 	} catch (error) {
 		throw new Error(`${metadataFile}: ${messageOf(error)}`);
 	}
-	const problems = linkProblems(absolute, exposes?.some((specifier) => !specifier.startsWith(API_SCOPE)) ?? false);
+	const apis = apisOf(named);
+	const problems = linkProblems(absolute, exposes?.some((specifier) => !Object.hasOwn(named ?? {}, specifier)) ?? false);
 	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
 	const root = realpathSync(absolute);
-	const apis = readApis(root, problems);
 	const exposed = readExposed(root, exposes, apis, problems);
 	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
 

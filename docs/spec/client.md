@@ -13,7 +13,7 @@ import { createClient, createDummyAdaptor, fileRunStore } from "@sleepymug/tau";
 const client = createClient({
   adaptors: { dummy: createDummyAdaptor() },        // each wire adaptor, by name, made by the caller
   adaptor: "dummy",                                 // the one a run goes through when it names none
-  runs: fileRunStore(".tau/runs"),                  // where runs are kept; by default in memory
+  runs: fileRunStore("state/runs"),                 // where runs are kept; by default in memory
 });
 
 const outcome = await client.run("plan-trip", call, { cwd, signal });   // start, and wait
@@ -24,9 +24,10 @@ await client.release(run);                                              // … a
 
 - `load(dir)` reads and checks the tau at `dir`, as [Directory](directory.md),
   [Metadata](metadata.md), [Placeholders](placeholders.md), [APIs](apis.md) and
-  [Packages](packages.md) have it, and gives its `description`, `files`, `args`, `apis`, `exposed`,
-  `skills` and `init`. It loads no TypeScript, and checks neither the declarations nor the
-  packages' code, which are their authors'.
+  [Packages](packages.md) have it, and gives its `description`, `files`, `args`, `apis`, each a
+  contract's name and range, `exposed`, `skills` and `init`. It reads nothing of `.tau/`, loads no
+  TypeScript, and checks neither the APIs' declarations nor the packages' code, which are their
+  authors'.
 - `check(dir, call, cwd)` reads the tau, resolves `call` against it, its paths against `cwd`, and
   checks the args against the schema and their placeholders (see [Calls](calls.md)), and the
   caller's paths, as a run's are when it starts (see [Paths](paths.md)), without starting it.
@@ -49,7 +50,8 @@ await client.release(run);                                              // … a
 ## Wire adaptors
 
 A **wire adaptor** is anything with `submit`, `finish` and `release` (see
-[Protocol](protocol.md#a-runs-life)), which the client is given, never loads. It is the part of
+[Protocol](protocol.md#a-runs-life)), and maybe `contract` (see
+[Protocol](protocol.md#contracts)), which the client is given, never loads. It is the part of
 the client that takes in what its backend sends, and checks it before it puts anything at the
 caller's paths, with the transfer helpers or as it will (see [Protocol](protocol.md#transfer)).
 
@@ -61,9 +63,11 @@ at the caller's paths. A run ends before `submit` gives its id. By default, its 
 every API, and its agent, `echoAgent`, leaves an empty file or directory at each `out` file's
 place, and gives back the prompt, rendered, as its text: a dry run.
 
+The dummy adaptor gives no contract: its backend holds no declarations.
+
 The **fleet** adaptor, `createFleetAdaptor({ transport, project })`, carries a run to the fleet
-service, over the service's socket, `fleetSocket(path)`, or another transport (see
-[The fleet adaptor](fleet.md)).
+service, and gives the contracts it implements, over the service's socket, `fleetSocket(path)`,
+or another transport (see [The fleet adaptor](fleet.md)).
 
 ## The `tau` command
 
@@ -75,7 +79,13 @@ tau start <dir> [call] [--adaptor <name>]
 tau finish <run> [--json]
 tau release <run>
 tau wait <run> [--json]
+tau api add <name>[@<range>] [--from <source>] [dir]
+tau api remove <name> [dir]
+tau api sync [dir]
 ```
+
+`tau api` keeps a tau's APIs, in `tau.json`, and their contracts, in `.tau/`, for its author (see
+[Authoring](authoring.md)).
 
 A call is JSON, `{"files": {...}, "args": {...}}`: `--call <file>`, `-` for stdin, or
 `--call-json '<json>'`; without one, `{}`. Its paths are relative to the working directory. `run`,

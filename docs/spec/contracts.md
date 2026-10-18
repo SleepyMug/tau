@@ -1,10 +1,12 @@
 # Contracts
 
 A **contract** is an API as it is published: an npm package of TypeScript declarations, which a
-tau holds a copy of (see [APIs](apis.md)), and a runtime implements (see
+tau names, with a range of its versions (see [APIs](apis.md)), and a runtime implements (see
 [Implementations](implementations.md)). Its package's name and version are its identity: an
 implementation of `@sleepymug/tau-api-notes` at 1.2.0 does what that package declares, and its
-documentation says, whoever wrote it and whatever tau it serves.
+documentation says, whoever wrote it and whatever tau it serves. It may be published on a
+registry, such as npm's, or only by a backend that implements it, which gives it to the authors
+of the taus it runs (see [Authoring](authoring.md)).
 
 ## The package
 
@@ -35,9 +37,9 @@ tau-api-notes/
 - `types`, `./index.d.ts`, so that an implementation's code imports it by name, as any package.
 
 Its **declarations** are `index.d.ts` and the declaration files (`.d.ts`) it imports, at any depth.
-A tau's copy holds only those and `package.json`; anything else the package holds, such as tests an
-implementation should pass, or an implementation for testing taus, is its publisher's, and no tau
-copies it. The declarations may declare whatever such files can: functions, sync or async,
+What a runtime shows the agent of a contract, and what the `tau` command pulls of it, are only those
+and `package.json`; anything else the package holds, such as tests an implementation should pass, is
+its publisher's. The declarations may declare whatever such files can: functions, sync or async,
 overloaded or generic; classes, constants, namespaces, interfaces and types. Beyond what TypeScript
 asks of such files:
 - **They type-check.** TypeScript 6.0 checks them with `strict` on, imports resolved as Node.js
@@ -55,7 +57,8 @@ asks of such files:
 
 A version is a SemVer 2.0.0 version, `MAJOR.MINOR.PATCH`, and maybe a prerelease after a `-`, as
 `1.3.0-rc.1`, or build metadata after a `+`, which nothing compares. A version **serves** another,
-the one a tau holds, when code written for that one works with it:
+the one a tau's range gives, `^1.2.0` giving 1.2.0 (see [APIs](apis.md)), when code written for
+that one works with it:
 - with a major of 1 or more, it has the same major, and a minor no less;
 - with a major of 0, it has the same minor too;
 - with a prerelease, it serves only itself, its build metadata aside.

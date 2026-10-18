@@ -15,6 +15,7 @@ bytes after its request, and a finish's answer bytes after it:
 | `{op: "submit", title, project?}` | the call, as a tar archive (see [Serialization](serialization.md)), which carries the tau | `{id}`, the run's | none |
 | `{op: "finish", id}` | none | `null` | the run's latest result, as a tar archive |
 | `{op: "release", id}` | none | `null` | none |
+| `{op: "contract", name, range?}` | none | `{name, version, description}` | the contract, as a tar archive (see [Serialization](serialization.md#contracts)) |
 
 - **Submit** starts a run of the call, and gives its id, its dsh session's. `title` is what names
   the run, the name of its tau's directory; `project`, absolute, is the folder whose dsh workspace
@@ -23,12 +24,17 @@ bytes after its request, and a finish's answer bytes after it:
 - **Finish** waits for the run to have a result, and sends it, the latest each time it is asked. A
   client that goes away stops the waiting.
 - **Release** drops the run, stopping it if it has not ended.
+- **Contract** gives the contract `name` at the newest version the service implements, within
+  `range`, a range as [APIs](apis.md) has it, when one is given, as the adaptor's `contract` asks
+  (see [Protocol](protocol.md#contracts)); the service packs it with `packContract`, and the
+  adaptor unpacks it with `unpackContract`.
 
 The adaptor checks a result as [Protocol](protocol.md#trust) asks of every adaptor, with
 `unpackResult`, before it puts anything at the caller's paths: what does not fit is a run that
 failed. A failed request is an error, its message the service's. The service may serve requests of
 its own, with other ops, such as listing its runs; `readFleetRunRequest` tells a run's from those,
-checking each run's request as from a client the service does not trust.
+and `readFleetContractRequest` a contract's, checking each as from a client the service does not
+trust.
 
 ## Transports
 

@@ -38,9 +38,9 @@ export interface DummyOptions {
 	readonly spool?: string;
 }
 
-/** A catalog that serves any API, as if with an implementation at the tau's own version. */
+/** A catalog that serves any API, as if with an implementation at the version its range gives, and holds no declarations. */
 export const anyImplementation: ImplementationCatalog = {
-	find: (contract, held) => ({ contract, version: held, module: `dummy:${contract}` }),
+	find: (contract, range) => (range === undefined ? undefined : { contract, version: range.slice(1), module: `dummy:${contract}` }),
 };
 
 /**

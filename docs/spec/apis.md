@@ -1,26 +1,33 @@
 # APIs
 
-Each directory in `api/` is an API, and `api/` holds nothing else. `api/<alias>/` holds a copy of
-a contract (see [Contracts](contracts.md)): its `package.json` and its declarations, each where the
-package has it, and nothing else. The agent's programs import it as `@api/<alias>`: as with a
-package's types, they get its `index.d.ts`. The **alias**, the directory's name, is the tau's
-own, and matches `^[A-Za-z0-9][A-Za-z0-9._-]*$`; the contract's name and version, in the copy's
-`package.json`, are what a runtime implements. A tau holds a contract under one alias at most.
+`apis`, in `tau.json` (see [Metadata](metadata.md)), names the APIs the tau's code calls, each a
+contract (see [Contracts](contracts.md)), from the contract's name to a **range**, the versions of
+it the tau works with:
 
-```
-api/
-├── notes/            @sleepymug/tau-api-notes, which programs import as @api/notes
-│   ├── package.json
-│   ├── index.d.ts
-│   └── tags.d.ts
-└── tau/              @sleepymug/tau-api, the tau API
-    ├── package.json
-    └── index.d.ts
+```json
+"apis": {
+  "@acme/travel": "^1.2.0",
+  "@sleepymug/tau-api": "^0.1.0"
+}
 ```
 
-A tau keeps the copy as the contract has it. A runtime gives the contract's implementation,
-whatever the copy declares, so a copy changed misleads only the tau's own code.
+Each name is an npm package's, scoped or not, as a contract's is. A range is `^` and a version,
+and takes the versions that serve that one (see [Contracts](contracts.md#versions)): the version
+the tau's author wrote against, or the oldest the tau works with.
 
-The runtime gives `@api/<alias>` (see [Implementations](implementations.md)). Wherever the tau's
-own code imports it, its declarations are `api/<alias>/index.d.ts`, as a `tsconfig.json` in the
-tau with `"paths": { "@api/*": ["./api/*/index.d.ts"] }` has it.
+The agent's programs, and the packages of the tau's own, import an API by its contract's name,
+`@acme/travel`, and get the runtime's implementation (see [Implementations](implementations.md)).
+The tau holds neither the contract's declarations nor its implementation: a runtime gives both,
+by the contract's name and the range alone. So a tau can call a contract that no registry has,
+which only its backend publishes; where its author found it is the `tau` command's (see
+[Authoring](authoring.md)), and no part of the tau.
+
+- **No package manager sees an API.** As a VS Code extension imports `vscode`, which its
+  `engines` names and no dependency of its lists, a tau names its APIs only in `apis`, and a
+  package of its own only in its `package.json`'s `tau.apis` (see [Packages](packages.md)), never
+  in `dependencies` or `peerDependencies`, which a package manager would install, from a
+  registry where a contract is declarations with nothing to run, or, published by a backend
+  alone, is missing, or is another package by the same name.
+- **Nothing in the tau shadows an API.** No `node_modules/` in the tau holds a package, or a
+  symlink, named as one of its APIs, since Node.js would find it before the runtime's
+  implementation (see [Implementations](implementations.md)).

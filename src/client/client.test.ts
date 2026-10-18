@@ -156,11 +156,10 @@ test("the call and the caller's paths are checked before the run goes anywhere",
 test("a backend that refuses a run refuses it to the caller: here, an API it implements at no version that serves", async () => {
 	const tau = write("tau-api", {
 		"PROMPT.md": "Go.\n",
-		"api/notes/package.json": JSON.stringify({ name: "@acme/notes", version: "1.2.0", description: "Notes.", tau: { contract: true }, type: "module", types: "./index.d.ts" }),
-		"api/notes/index.d.ts": "export declare function add(note: string): void;\n",
+		"tau.json": JSON.stringify({ apis: { "@acme/notes": "^1.2.0" } }),
 	});
 	const adaptor = createDummyAdaptor({ spool: path.join(tmp, "spool"), implementations: { find: () => undefined } });
-	await assert.rejects(createClient({ adaptors: { dummy: adaptor } }).run(tau, {}), /no implementation serves:\n {2}@api\/notes: @acme\/notes@1\.2\.0/u);
+	await assert.rejects(createClient({ adaptors: { dummy: adaptor } }).run(tau, {}), /no implementation serves:\n {2}@acme\/notes@\^1\.2\.0/u);
 });
 
 test("a run is finished as often as asked, from any client sharing its run store, each time putting its outputs, until it is released", async () => {

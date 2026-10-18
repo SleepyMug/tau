@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type Api, type Exposed, serves } from "../core/apis.js";
+import { type Api, compareVersions, type Exposed, within } from "../core/apis.js";
 import { readEnvelope } from "../core/forms.js";
 import { type CallFile, type Envelope, type Json, type Outcome, type Output, type Report, TAU_RUN, TAU_SKIP } from "../core/model.js";
 import { checkOutputs, checkPlaced, kindAt } from "../core/paths.js";
@@ -20,19 +20,36 @@ export interface Implementation {
 	readonly contract: string;
 	/** The version of the contract it implements. */
 	readonly version: string;
-	/** What the agent's programs get for `@api/<alias>`: a module's path or specifier, the backend's to give. */
+	/** What the agent's programs get when they import the contract by its name: a module's path or specifier, the backend's to give. */
 	readonly module: string;
+	/**
+	 * The directory of the contract's package.json and declarations, at `version`, where the backend
+	 * has them: what it shows the agent, and gives an adaptor that asks for the contract
+	 * (docs/spec/protocol.md#contracts); undefined when it has none.
+	 */
+	readonly declarations?: string;
 }
 
 /** Where the backend finds an implementation for each API. */
 export interface ImplementationCatalog {
-	/** An implementation of `contract` at a version that serves `held`, the tau's copy's; undefined without one. */
-	find(contract: string, held: string): Implementation | undefined;
+	/**
+	 * An implementation of `contract` at a version within `range`, the tau's, `^` and a version, or,
+	 * without one, at any version; undefined without one.
+	 */
+	find(contract: string, range?: string): Implementation | undefined;
 }
 
-/** A catalog of `implementations`, which finds the first that serves, by the contract's name and version alone. */
+/**
+ * A catalog of `implementations`, which finds the newest of a contract within the range, or of all
+ * without one, by the contract's name and version alone.
+ */
 export function catalogOf(implementations: readonly Implementation[]): ImplementationCatalog {
-	return { find: (contract, held) => implementations.find((it) => it.contract === contract && serves(it.version, held)) };
+	return {
+		find: (contract, range) =>
+			implementations
+				.filter((it) => it.contract === contract && (range === undefined || within(it.version, range)))
+				.reduce<Implementation | undefined>((newest, it) => (newest === undefined || compareVersions(it.version, newest.version) > 0 ? it : newest), undefined),
+	};
 }
 
 /** An API of the tau, and the implementation that serves it. */
@@ -51,7 +68,7 @@ export interface Admitted {
 	readonly tau: Tau;
 	/** The call, checked against the tau. */
 	readonly envelope: Envelope;
-	/** Each API of the tau, with its implementation, in the order of their aliases. */
+	/** Each API of the tau, with its implementation, in the order of their names. */
 	readonly links: readonly Link[];
 	/**
 	 * The run, once the backend placed its files: each `in` and `inout` file's content at its place,
@@ -141,8 +158,8 @@ function linksOf(tau: Tau, catalog: ImplementationCatalog): Link[] {
 	const links: Link[] = [];
 	const missing: string[] = [];
 	for (const api of tau.apis) {
-		const implementation = catalog.find(api.contract, api.version);
-		if (implementation === undefined) missing.push(`${api.specifier}: ${api.contract}@${api.version}`);
+		const implementation = catalog.find(api.name, api.range);
+		if (implementation === undefined) missing.push(`${api.name}@${api.range}`);
 		else links.push({ api, implementation });
 	}
 	if (missing.length > 0) throw new Error(`no implementation serves:\n  ${missing.join("\n  ")}`);

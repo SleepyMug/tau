@@ -27,9 +27,13 @@ const { report, sources } = placed.collect({ ok, text, failure });   // send the
   [Implementations](implementations.md)). It throws when the call cannot run as declared, before
   the backend need take any file.
 - **Its implementations.** An `ImplementationCatalog` finds an implementation of a contract at a
-  version that serves the tau's copy (see [Contracts](contracts.md#versions)): `{contract, version,
-  module}`, where `module` is what the backend gives the agent's programs as `@api/<alias>`, its to
-  say. `catalogOf(list)` finds the first in a list that serves, by name and version alone.
+  version within the tau's range (see [APIs](apis.md) and [Contracts](contracts.md#versions)), or,
+  given no range, at any: `{contract, version, module, declarations?}`, where `module` is what the
+  backend gives the agent's programs by the contract's name, its to say, and `declarations` the
+  directory of the contract's `package.json` and declarations, at `version`, where the backend has
+  them, which it shows the agent (see [Implementations](implementations.md)), and gives to an
+  adaptor that asks for the contract (see [Protocol](protocol.md#contracts)). `catalogOf(list)`
+  finds the newest in a list within the range, or of all without one, by name and version alone.
 - **Place the files.** The backend chooses each file's place, absolute and ending in its file's base
   name (`placesUnder(dir, envelope)` gives `<dir>/<name>/<base>`), puts each `in` and `inout`
   file's content there, and makes the directory of each `out` file's place. `admitted.place(places)`

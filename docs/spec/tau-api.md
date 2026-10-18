@@ -3,9 +3,9 @@
 The **tau API** lets the agent's programs read the run's files and args, and run other taus, and
 names the exit codes of the tau's init (see [Init](init.md)). It is the contract
 `@sleepymug/tau-api` (see [Contracts](contracts.md)), whose declarations, in this repository's
-`contracts/tau-api/`, say what each of these does. A tau that uses it holds a copy of it, by
-convention at `api/tau/` (see [APIs](apis.md)), and a runtime that implements it gives its
-implementation (see [Implementations](implementations.md)):
+`contracts/tau-api/`, say what each of these does. A tau that uses it names it in `apis` (see
+[APIs](apis.md)), and its programs import it as `@sleepymug/tau-api`, from the runtime that
+implements it (see [Implementations](implementations.md)):
 - `files()`, where this agent sees each of the run's files, by name, extra files included;
 - `args()`, the run's args, their placeholders expanded (see [Placeholders](placeholders.md));
 - `run(tau, call, signal)`, which runs the tau at `tau`, a directory, with `call`, as

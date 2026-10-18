@@ -14,3 +14,4 @@ export {
 	unpackCall,
 	unpackResult,
 } from "./archive.js";
+export { packContract, unpackContract } from "./contract.js";

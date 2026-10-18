@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { createClient } from "../client/client.js";
 import { packResult } from "../wire-tar/archive.js";
-import { createFleetAdaptor, type FleetHandler, type FleetTransport, fleetLoopback, readFleetRunRequest } from "./fleet.js";
+import { packContract } from "../wire-tar/contract.js";
+import { createFleetAdaptor, type FleetHandler, type FleetTransport, fleetLoopback, readFleetContractRequest, readFleetRunRequest } from "./fleet.js";
 import { FakeFleet } from "./fleet-fake.test.util.js";
 import { defaultFleetSocket, FleetUnreachable, fleetSocket, listenFleet } from "./fleet-socket.js";
 
@@ -197,6 +198,52 @@ test("a run's requests are checked as the service takes them, and others are lef
 	assert.throws(() => readFleetRunRequest({ op: "submit", title: "greet", project: "here" }), /takes project, an absolute path/u);
 	assert.throws(() => readFleetRunRequest({ op: "submit", title: "greet", targets: {} }), /^TypeError: submit takes no targets$/u);
 	assert.throws(() => readFleetRunRequest({ op: "finish" }), /^TypeError: finish takes the run's id, a string$/u);
+});
+
+/** A contract's package, with more than its declarations. */
+function contractPackage(dir: string, version: string): string {
+	return write(dir, {
+		"package.json": JSON.stringify({ name: "@acme/notes", version, description: "Notes.", tau: { contract: true }, type: "module", types: "./index.d.ts" }),
+		"index.d.ts": 'export type { Tag } from "./types/tags.js";\nexport declare function add(note: string): void;\n',
+		"types/tags.d.ts": "export type Tag = string;\n",
+		"test/notes.test.js": "",
+		"README.md": "",
+	});
+}
+
+test("the fleet service gives the contracts it implements, the newest within a range, its package.json and declarations alone", async () => {
+	const fleet = new FakeFleet(async () => ({ ok: true, text: "" }), [
+		{ contract: "@acme/notes", version: "1.2.0", module: "/x", declarations: contractPackage("notes-1.2", "1.2.0") },
+		{ contract: "@acme/notes", version: "1.4.0", module: "/x", declarations: contractPackage("notes-1.4", "1.4.0") },
+	]);
+	const adaptor = createFleetAdaptor({ transport: fleetSocket(await serving(fleet.handle)) });
+	const at = path.join(tmp, "pulled", "notes");
+	assert.deepEqual(await adaptor.contract?.("@acme/notes", "^1.2.0", at), { name: "@acme/notes", version: "1.4.0", description: "Notes." });
+	assert.deepEqual(readdirSync(at, { recursive: true }).sort(), ["index.d.ts", "package.json", "types", "types/tags.d.ts"]);
+	await assert.rejects(adaptor.contract?.("@acme/notes", "^2.0.0", path.join(tmp, "pulled", "none")) ?? Promise.resolve(), /no contract @acme\/notes within \^2\.0\.0/u);
+	assert.equal(existsSync(path.join(tmp, "pulled", "none")), false);
+});
+
+test("a contract the service sends that is not the one asked for is refused, and leaves nothing", async () => {
+	const lying: FleetHandler = async () => ({
+		value: { name: "@acme/notes", version: "1.4.0", description: "Notes." },
+		body: Readable.from(packContract(contractPackage("notes-3.0", "3.0.0"))),
+	});
+	const adaptor = createFleetAdaptor({ transport: fleetLoopback(lying) });
+	const at = path.join(tmp, "pulled", "lied");
+	await assert.rejects(adaptor.contract?.("@acme/notes", "^1.2.0", at) ?? Promise.resolve(), /it is at 3\.0\.0, which is not within \^1\.2\.0/u);
+	assert.equal(existsSync(at), false);
+	await assert.rejects(adaptor.contract?.("@acme/other", undefined, at) ?? Promise.resolve(), /it is @acme\/notes, not @acme\/other/u);
+	assert.equal(existsSync(at), false);
+});
+
+test("a request for a contract is checked as the service takes it", () => {
+	assert.deepEqual(readFleetContractRequest({ op: "contract", name: "@acme/notes" }), { op: "contract", name: "@acme/notes" });
+	assert.deepEqual(readFleetContractRequest({ op: "contract", name: "notes", range: "^1.0.0" }), { op: "contract", name: "notes", range: "^1.0.0" });
+	assert.equal(readFleetContractRequest({ op: "submit", title: "greet" }), undefined);
+	assert.throws(() => readFleetContractRequest({ op: "contract", name: "Notes" }), /contract takes name, a contract's/u);
+	assert.throws(() => readFleetContractRequest({ op: "contract", name: "notes", range: "1.0.0" }), /contract takes range, \^ and a version/u);
+	assert.throws(() => readFleetContractRequest({ op: "contract", name: "notes", version: "1.0.0" }), /^TypeError: contract takes no version$/u);
 });
 
 test("the fleet service's socket is $TAU_FLEET_SOCKET, or in the dsh home", () => {

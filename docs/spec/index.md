@@ -1,8 +1,9 @@
 # tau: Transportable Agent Unit
 
 A tau is an agent packaged as a directory. Like a program, it names the APIs it needs, each a
-**contract**, a package of TypeScript declarations with a name and a version, of which it holds a
-copy, but never their implementations or any credentials. It also
+**contract**, a package of TypeScript declarations with a name and a version, by its name and a
+range of its versions, as an editor's extension names the editor's version it needs, and holds
+neither their declarations nor their implementations, nor any credentials. It also
 declares what it takes: **files**, the caller's files and directories, each saying whether the
 agent reads it, writes it, or both; and **args**, JSON that a JSON Schema describes.
 
@@ -27,9 +28,11 @@ This spec is the reference:
   - [Prompt](prompt.md): `PROMPT.md`.
   - [Placeholders](placeholders.md): `${...}` in the prompt, the args and init, and what each
     becomes.
-  - [APIs](apis.md): `api/`, what the agent's programs call.
+  - [APIs](apis.md): `apis`, what the agent's programs call, by name and range.
   - [Contracts](contracts.md): an API as it is published, its package, and its versions.
   - [Packages](packages.md): `node_modules/`, code of the tau's own, built on its APIs.
+  - [Authoring](authoring.md): `.tau/`, where the `tau` command keeps the APIs' contracts for the
+    tau's author, from npm, a backend, or a directory.
 - A run:
   - [Calls](calls.md): what a run takes: a path for each file, extra files, and the args; and
     a call passed on.

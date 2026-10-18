@@ -1,32 +1,22 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
-/** How the agent's programs import an API: `@api/<alias>` (docs/spec/apis.md). */
-export const API_SCOPE = "@api/";
-
-/** An API of a tau: `api/<alias>/`, a copy of a contract (docs/spec/apis.md). */
+/** An API of a tau: a contract its code calls, which `apis` in tau.json names with a range (docs/spec/apis.md). */
 export interface Api {
-	/** Its directory's name, by which programs import it. */
-	readonly alias: string;
-	/** What programs import it as: `@api/<alias>`. */
-	readonly specifier: string;
-	/** `api/<alias>/`, absolute, which holds its `package.json` and its declarations, `index.d.ts` first. */
-	readonly dir: string;
-	/** The contract's name, its package's. */
-	readonly contract: string;
-	/** The contract's version, which an implementation's must serve. */
+	/** The contract's name, an npm package's, by which programs import it. */
+	readonly name: string;
+	/** The versions of it the tau works with: `^` and a version. */
+	readonly range: string;
+	/** The range's version, which an implementation's must serve. */
 	readonly version: string;
-	/** What the contract is, as its `package.json` says. */
-	readonly description: string;
 }
 
 /** What a tau exposes to the agent's programs (docs/spec/packages.md): one of its APIs, or a package of its own. */
 export type Exposed =
 	| {
 			readonly kind: "api";
-			/** `@api/<alias>`. */
+			/** The contract's name, which programs import. */
 			readonly specifier: string;
-			readonly description: string;
 			readonly api: Api;
 	  }
 	| {
@@ -46,10 +36,8 @@ export interface Contract {
 	readonly description: string;
 }
 
-/** What an alias may be. */
-const ALIAS = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
-/** An npm package's name, scoped or not. */
-const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/u;
+/** An npm package's name, scoped or not, as a contract's is. */
+export const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/u;
 /** SemVer 2.0.0's own expression for a version. */
 const VERSION =
 	/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/u;
@@ -72,8 +60,42 @@ export function parseVersion(version: string): Version | undefined {
 	return { major: Number(major), minor: Number(minor), patch: Number(patch), prerelease };
 }
 
+/** The version a range gives, `1.2.0` for `^1.2.0`, or undefined when it is not a range: `^` and a version (docs/spec/apis.md). */
+export function rangeVersion(range: string): string | undefined {
+	return range.startsWith("^") && parseVersion(range.slice(1)) !== undefined ? range.slice(1) : undefined;
+}
+
+/** Whether `version` is within `range`: whether it serves the version the range gives. Throws TypeError for what is not a range. */
+export function within(version: string, range: string): boolean {
+	const wanted = rangeVersion(range);
+	if (wanted === undefined) throw new TypeError(`${JSON.stringify(range)} is not a range, ^ and a version`);
+	return serves(version, wanted);
+}
+
 /**
- * Whether an implementation of a contract at `version` serves an API whose copy is at `held`
+ * How two versions compare, by SemVer 2.0.0's precedence: negative when `a` is older than `b`,
+ * positive when newer, 0 when neither, build metadata aside. Throws TypeError for what is not a version.
+ */
+export function compareVersions(a: string, b: string): number {
+	const [x, y] = [parseVersion(a), parseVersion(b)];
+	if (x === undefined) throw new TypeError(`${JSON.stringify(a)} is not a SemVer version`);
+	if (y === undefined) throw new TypeError(`${JSON.stringify(b)} is not a SemVer version`);
+	const order = x.major - y.major || x.minor - y.minor || x.patch - y.patch;
+	if (order !== 0) return order;
+	if (x.prerelease === undefined || y.prerelease === undefined) return (x.prerelease === undefined ? 1 : 0) - (y.prerelease === undefined ? 1 : 0);
+	const [xs, ys] = [x.prerelease.split("."), y.prerelease.split(".")];
+	for (let i = 0; i < Math.min(xs.length, ys.length); i++) {
+		const [p, q] = [xs[i] as string, ys[i] as string];
+		const [pn, qn] = [/^\d+$/u.test(p), /^\d+$/u.test(q)];
+		if (pn && qn && Number(p) !== Number(q)) return Number(p) - Number(q);
+		if (pn !== qn) return pn ? -1 : 1;
+		if (p !== q) return p < q ? -1 : 1;
+	}
+	return xs.length - ys.length;
+}
+
+/**
+ * Whether an implementation of a contract at `version` serves an API whose range gives `held`
  * (docs/spec/contracts.md): with a major of 1 or more, the same major and a minor no less; with a
  * major of 0, the same minor too; with a prerelease, only itself, build metadata aside. Throws
  * TypeError for what is not a version.
@@ -131,94 +153,43 @@ function contractProblems(json: unknown): string[] {
 }
 
 /**
- * The APIs of the tau whose real directory is `root`, each a directory in `api/`, which holds
- * nothing else, named by its alias, and holding a contract's package.json, its `index.d.ts`, and
- * no file but declaration files, no two the same contract; none without `api/`. Each problem is
- * pushed to `problems`, relative to the tau.
+ * The APIs `apis` in tau.json names, each a contract's name and a range, in the order of their
+ * names; none without it. tau.json's reader checks each name and range.
  */
-export function readApis(root: string, problems: string[]): Api[] {
-	const apiDir = path.join(root, "api");
-	if (!existsSync(apiDir)) return [];
-	const apis: Api[] = [];
-	const aliases = new Map<string, string>();
-	for (const alias of readdirSync(apiDir).sort()) {
-		const dir = path.join(apiDir, alias);
-		const at = `api/${alias}`;
-		if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
-			problems.push(`${at}: api/ holds only APIs, each a directory with a contract's package.json`);
-			continue;
-		}
-		if (!ALIAS.test(alias)) problems.push(`${at}: an API's alias matches ${ALIAS.source}`);
-		if (!existsSync(path.join(dir, "package.json"))) {
-			problems.push(`${at}: holds no package.json, a contract's`);
-			continue;
-		}
-		let contract: Contract;
-		try {
-			contract = readContract(dir);
-		} catch (error) {
-			problems.push((error as Error).message.replace(dir, at));
-			continue;
-		}
-		if (!statSync(path.join(dir, INDEX), { throwIfNoEntry: false })?.isFile()) problems.push(`${at}: holds no ${INDEX}`);
-		for (const file of strayFiles(dir)) problems.push(`${at}/${file}: an API holds only its package.json and declaration files`);
-		const other = aliases.get(contract.name);
-		if (other !== undefined) problems.push(`${at}: holds ${contract.name}, as api/${other} does; a tau holds a contract once`);
-		else aliases.set(contract.name, alias);
-		apis.push({
-			alias,
-			specifier: API_SCOPE + alias,
-			dir,
-			contract: contract.name,
-			version: contract.version,
-			description: contract.description,
-		});
-	}
-	return apis;
-}
-
-/** The files under `dir`, relative to it, that are neither its package.json nor declaration files. */
-function strayFiles(dir: string): string[] {
-	const stray: string[] = [];
-	const walk = (folder: string, prefix: string): void => {
-		for (const entry of readdirSync(folder).sort()) {
-			const file = path.join(folder, entry);
-			const relative = prefix + entry;
-			if (statSync(file, { throwIfNoEntry: false })?.isDirectory()) walk(file, `${relative}/`);
-			else if (relative !== "package.json" && !entry.endsWith(".d.ts")) stray.push(relative);
-		}
-	};
-	walk(dir, "");
-	return stray;
+export function apisOf(apis: { readonly [name: string]: string } | undefined): Api[] {
+	return Object.entries(apis ?? {})
+		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+		.map(([name, range]) => ({ name, range, version: rangeVersion(range) as string }));
 }
 
 /**
  * What the tau whose real directory is `root` exposes, as `exposes` lists it; without the list,
- * every API in `apis`. Each `@api/<alias>` it lists is an API of the tau, and each other name a
- * package in its node_modules/, with a package.json, and no node_modules/ in the tau holds an
- * `@api` scope, which would hide the runtime's implementations. Each problem is pushed to
- * `problems`.
+ * every API in `apis`. Each name it lists is one of the tau's APIs, or else a package in its
+ * node_modules/, with a package.json, which names in `tau.apis` the APIs it imports, each one of
+ * the tau's, at a range whose version serves the package's. No node_modules/ in the tau holds a
+ * package named as one of its APIs, which would hide the runtime's implementation. Each problem
+ * is pushed to `problems`.
  */
 export function readExposed(root: string, exposes: readonly string[] | undefined, apis: readonly Api[], problems: string[]): Exposed[] {
-	const toExpose = (api: Api): Exposed => ({ kind: "api", specifier: api.specifier, description: api.description, api });
+	const toExpose = (api: Api): Exposed => ({ kind: "api", specifier: api.name, api });
 	if (exposes === undefined) return apis.map(toExpose);
-	const declared = new Map(apis.map((api) => [api.specifier, api]));
+	const declared = new Map(apis.map((api) => [api.name, api]));
 	const exposed: Exposed[] = [];
 	for (const specifier of exposes) {
-		if (specifier.startsWith(API_SCOPE)) {
-			const api = declared.get(specifier);
-			if (api === undefined) problems.push(`exposes ${specifier}, but the tau has no api/${specifier.slice(API_SCOPE.length)}/`);
-			else exposed.push(toExpose(api));
+		const api = declared.get(specifier);
+		if (api !== undefined) {
+			exposed.push(toExpose(api));
 			continue;
 		}
 		const dir = path.join(root, "node_modules", ...specifier.split("/"));
-		let manifest: { description?: unknown };
+		let manifest: { description?: unknown; tau?: unknown };
 		try {
-			manifest = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")) as { description?: unknown };
+			manifest = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")) as { description?: unknown; tau?: unknown };
 		} catch {
-			problems.push(`exposes ${specifier}, which is not a package in node_modules/`);
+			problems.push(`exposes ${specifier}, which is neither one of its APIs nor a package in node_modules/`);
 			continue;
 		}
+		problems.push(...packageApiProblems(specifier, manifest.tau, declared));
 		const { description } = manifest;
 		exposed.push({
 			kind: "package",
@@ -227,15 +198,39 @@ export function readExposed(root: string, exposes: readonly string[] | undefined
 			dir,
 		});
 	}
-	if (exposed.some((entry) => entry.kind === "package"))
-		problems.push(...apiScopes(root).map((scope) => `${scope}: an @api scope in the tau would hide the runtime's implementations`));
+	if (apis.length > 0 && exposed.some((entry) => entry.kind === "package"))
+		problems.push(...shadows(root, apis).map((at) => `${at}: is named as an API of the tau, whose implementation it would hide`));
 	return exposed;
 }
 
-/** Each `@api` scope in a node_modules/ under the tau's own, relative to the tau. */
-function apiScopes(root: string): string[] {
+/** Why the `tau` of the package `name`'s package.json does not fit the tau's APIs, `declared`, by name. */
+function packageApiProblems(name: string, tau: unknown, declared: ReadonlyMap<string, Api>): string[] {
+	if (tau === undefined) return [];
+	const at = `node_modules/${name}/package.json`;
+	const apis = typeof tau === "object" && tau !== null && !Array.isArray(tau) ? (tau as { apis?: unknown }).apis : undefined;
+	if (apis === undefined) return [];
+	if (typeof apis !== "object" || apis === null || Array.isArray(apis)) return [`${at}: \`tau.apis\` must be an object, from each API's name to a range`];
+	const problems: string[] = [];
+	for (const [api, range] of Object.entries(apis)) {
+		const version = typeof range === "string" ? rangeVersion(range) : undefined;
+		if (!PACKAGE_NAME.test(api) || version === undefined) {
+			problems.push(`${at}: \`tau.apis\`: ${JSON.stringify(api)}: ${JSON.stringify(range)} is not a contract's name and a range, ^ and a version`);
+			continue;
+		}
+		const held = declared.get(api);
+		if (held === undefined) problems.push(`${at}: imports the API ${api}, which the tau's \`apis\` does not name`);
+		else if (!serves(held.version, version))
+			problems.push(`${at}: needs ${api}@${range as string}, which the tau's ${held.range} does not give`);
+	}
+	return problems;
+}
+
+/** Each package or symlink in a node_modules/ under the tau's own named as one of `apis`, relative to the tau. */
+function shadows(root: string, apis: readonly Api[]): string[] {
+	const names = new Set(apis.map((api) => api.name));
 	const found: string[] = [];
 	const walked = new Set<string>();
+	const isDir = (file: string): boolean => statSync(file, { throwIfNoEntry: false })?.isDirectory() === true;
 	const walk = (dir: string): void => {
 		let real: string;
 		try {
@@ -246,14 +241,21 @@ function apiScopes(root: string): string[] {
 		}
 		if (walked.has(real)) return;
 		walked.add(real);
-		for (const entry of readdirSync(real, { withFileTypes: true })) {
-			const file = path.join(real, entry.name);
-			if (!(entry.isDirectory() || (entry.isSymbolicLink() && statSync(file, { throwIfNoEntry: false })?.isDirectory())))
-				continue;
-			if (entry.name === API_SCOPE.slice(0, -1) && path.basename(real) === "node_modules") found.push(path.relative(root, file));
-			else walk(file);
+		const inModules = path.basename(dir) === "node_modules";
+		for (const entry of readdirSync(real, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+			const file = path.join(dir, entry.name);
+			if (inModules) {
+				if (names.has(entry.name)) {
+					found.push(path.relative(root, file));
+					continue;
+				}
+				if (entry.name.startsWith("@") && isDir(file))
+					for (const inner of readdirSync(file).sort())
+						if (names.has(`${entry.name}/${inner}`)) found.push(path.relative(root, path.join(file, inner)));
+			}
+			if (entry.isDirectory() || (entry.isSymbolicLink() && isDir(file))) walk(file);
 		}
 	};
 	walk(path.join(root, "node_modules"));
-	return found.sort();
+	return [...new Set(found)].sort();
 }

@@ -343,7 +343,7 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 		["ref", { args: { ...object, properties: { a: { $ref: "https://example.com/a.json" } } } }, /`args` is not a JSON Schema the spec takes: can't resolve reference https:\/\/example\.com\/a\.json/],
 		["exposes", { exposes: "notes-kit" }, /`exposes` must be an array/],
 		["exposesname", { exposes: ["notes-kit/sub"] }, /`exposes`: "notes-kit\/sub" is not a package's name/],
-		["exposestwice", { exposes: ["@api/notes", "@api/notes"] }, /`exposes` lists @api\/notes twice/],
+		["exposestwice", { exposes: ["@acme/notes", "@acme/notes"] }, /`exposes` lists @acme\/notes twice/],
 		["init", { init: ["node", "init.ts"] }, /`init` must be a command, a string that is not blank/],
 		["initblank", { init: " " }, /`init` must be a command/],
 	];
@@ -448,7 +448,7 @@ test("a call an archive carries is checked against the tau, as one from a caller
 test("a symlink in what a runtime reads is relative, and stays in the tau", () => {
 	const dir = write("links", {
 		"PROMPT.md": "Hi.",
-		"api/notes/types.d.ts": "",
+		"skills/notes/types.d.ts": "",
 		"lib/clock/index.d.ts": "",
 		"lib/skill/SKILL.md": "",
 		"lib/deep/SKILL.md": "",
@@ -460,29 +460,29 @@ test("a symlink in what a runtime reads is relative, and stays in the tau", () =
 	};
 	// Fine: relative, and inside.
 	at("../lib/skill", "skills/ok");
-	at("types.d.ts", "api/notes/alias.d.ts");
-	at("../lib/clock", "api/clock");
+	at("types.d.ts", "skills/notes/alias.d.ts");
+	at("../lib/clock", "skills/clock");
 	// What no runtime reads is the author's.
 	at("/usr", "src/notes/node_modules");
 	// Refused.
 	at("/usr", "skills/absolute");
-	at("../../../outside.d.ts", "api/notes/outside.d.ts");
-	at("nowhere", "api/dangling");
-	at("loop-b", "api/loop-a");
-	at("loop-a", "api/loop-b");
+	at("../../../outside.d.ts", "skills/notes/outside.d.ts");
+	at("nowhere", "skills/dangling");
+	at("loop-b", "skills/loop-a");
+	at("loop-a", "skills/loop-b");
 	at("../lib/chain", "skills/chain");
 	at("/usr", "lib/chain");
 	at("../lib/deep", "skills/deep");
 	at("/usr", "lib/deep/absolute");
 	assert.throws(() => loadTau(dir), (error: Error) => {
 		assert.deepEqual(error.message.split("\n").slice(1).map((line) => line.trim()).sort(), [
-			"api/dangling: leads to api/nowhere, which does not exist",
-			"api/loop-a: is a loop of symlinks",
-			"api/loop-b: is a loop of symlinks",
-			"api/notes/outside.d.ts: leads outside the tau, to " + path.join(tmp, "outside.d.ts"),
 			"lib/deep/absolute: leads to the absolute path /usr; a symlink in a tau is relative",
 			"skills/absolute: leads to the absolute path /usr; a symlink in a tau is relative",
 			"skills/chain: leads through lib/chain to the absolute path /usr; a symlink in a tau is relative",
+			"skills/dangling: leads to skills/nowhere, which does not exist",
+			"skills/loop-a: is a loop of symlinks",
+			"skills/loop-b: is a loop of symlinks",
+			"skills/notes/outside.d.ts: leads outside the tau, to " + path.join(tmp, "outside.d.ts"),
 		]);
 		return true;
 	});

@@ -2,7 +2,7 @@ import { type Dirent, lstatSync, readdirSync, readlinkSync, realpathSync, statSy
 import path from "node:path";
 
 /** What a runtime reads of a tau; node_modules/ too, when the tau exposes a package of its own. */
-const READ = ["PROMPT.md", "tau.json", "skills", "api"];
+const READ = ["PROMPT.md", "tau.json", "skills"];
 /** More links in a row than this is a loop; Linux gives up at 40 too. */
 const MAX_HOPS = 40;
 

@@ -48,6 +48,8 @@ export interface Content {
 export interface ContentSource {
 	readonly file?: string;
 	readonly from: string | readonly string[];
+	/** What a directory at `from` holds that its content leaves out, by name. */
+	readonly leave?: readonly string[];
 }
 
 /** More links in a row than this is a loop, as Linux has it. */
@@ -60,16 +62,16 @@ const NOTHING: AsyncIterable<Uint8Array> = { [Symbol.asyncIterator]: async funct
  * a directory's in order of name, each with its permission bits, and its symlinks as they are.
  */
 export async function* readContents(sources: readonly ContentSource[]): AsyncGenerator<Content> {
-	for (const { file, from } of sources) {
-		const entries = typeof from === "string" ? walkSource(from) : walkSources(from);
+	for (const { file, from, leave = [] } of sources) {
+		const entries = typeof from === "string" ? walkSource(from, leave) : walkSources(from);
 		yield { ...(file === undefined ? {} : { file }), kind: typeof from === "string" ? kindAt(from) : "dir", entries };
 	}
 }
 
 /** The entries of `source`, which is not a symlink. */
-async function* walkSource(source: string): AsyncGenerator<ContentEntry> {
+async function* walkSource(source: string, leave: readonly string[]): AsyncGenerator<ContentEntry> {
 	if ((await lstat(source)).isSymbolicLink()) throw new Error(`${source} is a symlink, which a content is not`);
-	yield* walk(source, "");
+	yield* walk(source, "", leave);
 }
 
 /** Several paths: a directory holding each under its base name. */
@@ -82,22 +84,25 @@ async function* walkSources(sources: readonly string[]): AsyncGenerator<ContentE
 	}
 }
 
-/** The entries of `file`, at `at` in its content, and of all a directory holds, in order of name. */
-async function* walk(file: string, at: string): AsyncGenerator<ContentEntry> {
+/** The entries of `file`, at `at` in its content, and of all a directory holds, in order of name, but what it holds named in `leave`. */
+async function* walk(file: string, at: string, leave: readonly string[] = []): AsyncGenerator<ContentEntry> {
 	const stats = await lstat(file);
 	const mode = stats.mode & 0o777;
 	if (stats.isSymbolicLink()) yield { path: at, type: "symlink", mode, size: 0, target: await readlink(file), body: NOTHING };
 	else if (stats.isFile()) yield { path: at, type: "file", mode, size: stats.size, body: { [Symbol.asyncIterator]: () => createReadStream(file)[Symbol.asyncIterator]() } };
 	else if (stats.isDirectory()) {
 		yield { path: at, type: "dir", mode, size: 0, body: NOTHING };
-		for (const entry of (await readdir(file)).sort()) yield* walk(path.join(file, entry), at === "" ? entry : `${at}/${entry}`);
+		for (const entry of (await readdir(file)).sort()) if (!leave.includes(entry)) yield* walk(path.join(file, entry), at === "" ? entry : `${at}/${entry}`);
 	} else throw new Error(`${file} is neither a file, a directory nor a symlink, which a content holds`);
 }
 
-/** A job's contents: the tau's, then each `in` and `inout` file's, in the envelope's order, each read as it is read. */
+/**
+ * A job's contents: the tau's, but its `.tau/`, which no client carries (docs/spec/directory.md),
+ * then each `in` and `inout` file's, in the envelope's order, each read as it is read.
+ */
 export function jobContents(job: Job): AsyncGenerator<Content> {
 	const files = Object.keys(job.envelope.files).filter((name) => Object.hasOwn(job.inputs, name));
-	return readContents([{ from: job.tau }, ...files.map((file) => ({ file, from: job.inputs[file] as string | readonly string[] }))]);
+	return readContents([{ from: job.tau, leave: [".tau"] }, ...files.map((file) => ({ file, from: job.inputs[file] as string | readonly string[] }))]);
 }
 
 /**

@@ -50,8 +50,8 @@ so that they can do it as well as they know how.
   ```
 
 - **The job**: what the client hands its adaptor: the envelope; the tau's directory, which always
-  goes with the call; and the caller's path of each `in` and `inout` file, or, for an `in`, its
-  paths.
+  goes with the call, all of it but `.tau/` (see [Directory](directory.md)); and the caller's path
+  of each `in` and `inout` file, or, for an `in`, its paths.
 - **The delivery**: where the client asks its adaptor to put a run's outputs: the envelope's
   files, and the caller's path of each `out` and `inout` file, its **target**.
 - **The report**: how a run ended, and what it gives back: `ok`, whether it succeeded; `text`, the
@@ -74,7 +74,7 @@ interface WireAdaptor {
 ```
 
 - **Submit.** The adaptor hands the run to its backend, which may refuse it: a call that does not
-  fit the tau, or an API it implements at no version that serves the tau's copy. It gives the
+  fit the tau, or an API it implements at no version that serves the tau's range. It gives the
   run's **id**, which means the same run to it in any process.
 - **Finish.** The adaptor waits until the run has a result, puts its outputs at the targets, as
   [Results](results.md) has it, a directory merging into one there, and gives its report. It
@@ -85,8 +85,8 @@ interface WireAdaptor {
 - **Release.** The backend drops the run, stopping it if it has not ended; then nothing finishes it.
   There is no other way to stop a run.
 
-These three are the whole contract, of an adaptor and of the backend behind it. **Wait** is not
-among them: it is the client's verb, in the SDK and the `tau` command, and it is finish, then
+These three are the whole contract of a run, of an adaptor and of the backend behind it. **Wait** is
+not among them: it is the client's verb, in the SDK and the `tau` command, and it is finish, then
 release, each made as above, so an adaptor and a backend never see a wait.
 
 The client keeps, for each run it started, its adaptor, its id, and its delivery, in a **run
@@ -94,6 +94,22 @@ store**, until it is released, so that whoever finishes or releases the run, in 
 started it or another sharing the store, can. Runs nest: an agent's program that runs a tau,
 through the tau API, is the caller of that run (see [The tau API](tau-api.md)), and the backend
 can make it as a client does.
+
+## Contracts
+
+```ts
+interface WireAdaptor {
+  contract?(name: string, range: string | undefined, dir: string, signal?: AbortSignal): Promise<Contract>;
+}
+```
+
+An adaptor may have one more verb, which no run uses: **contract** puts at `dir`, a directory that
+does not exist, the contract `name` at the newest version its backend implements, within `range`
+when one is given, its `package.json` and declarations and nothing else (see
+[Contracts](contracts.md)), and gives its `name`, `version` and `description`. It is how the
+author of a tau gets a contract that only the backend publishes (see [Authoring](authoring.md)).
+The adaptor checks what it puts as from a backend it does not trust: a contract's package, of the
+name asked for, at a version within the range, holding no symlink.
 
 ## Trust
 
@@ -136,16 +152,15 @@ uses as arguments, never loading it by name:
 | `client` (`@sleepymug/tau`) | The client SDK, the `WireAdaptor` it takes, and the run store | `core` |
 | `backend` (`@sleepymug/tau/backend`) | The backend SDK, and the implementation catalog it takes | `core` |
 | `transfer` (`@sleepymug/tau/transfer`) | Contents, and delivery, for adaptors and backends | `core` |
-| `wire-tar` (`@sleepymug/tau/wire-tar`) | Calls and results as tar archives | `core`, `transfer` |
+| `wire-tar` (`@sleepymug/tau/wire-tar`) | Calls, results and contracts as tar archives | `core`, `transfer` |
 | `adaptors` (`@sleepymug/tau/adaptors`) | The built-in wire adaptors: `dummy`, and `fleet`, with its transports | any of the above |
-| `cli` | The `tau` command, which puts the client and its adaptors together | `core`, `client`, `adaptors` |
+| `cli` | The `tau` command, which puts the client and its adaptors together, and pulls contracts for a tau's author | `core`, `client`, `adaptors`, `wire-tar`, for npm's tarballs |
 
 Neither the client nor the backend SDK knows how files move.
 
 ## Open
 
-- Which APIs a backend serves, which a client could ask for through its adaptor before a run, and
-  from which a tau could take its APIs; for now a tau holds its copies, and the backend matches
-  them.
+- Listing the contracts a backend implements, so that a client can check a tau's APIs before it
+  submits a run, and its author choose among them.
 - Asking a run's agent to improve its result, after which finishing gives the new one.
 - A tau the backend already holds, which a call could name by a digest rather than carry.

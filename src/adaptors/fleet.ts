@@ -1,7 +1,10 @@
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import type { WireAdaptor } from "../client/adaptor.js";
 import { isObject } from "../core/util.js";
+import { PACKAGE_NAME, rangeVersion } from "../core/apis.js";
 import { packCall, unpackResult } from "../wire-tar/archive.js";
+import { unpackContract } from "../wire-tar/contract.js";
 
 /**
  * The fleet wire adaptor (docs/spec/fleet.md): a run on the fleet service, the backend of
@@ -18,8 +21,8 @@ export const FLEET_PROTOCOL = 1;
 
 /**
  * A request of the fleet service: its `op`, and what the op takes. A run's three are tau's
- * ({@link FleetRunRequest}); the service may serve others of its own, which a transport carries
- * just the same.
+ * ({@link FleetRunRequest}), and so is `contract` ({@link FleetContractRequest}); the service may
+ * serve others of its own, which a transport carries just the same.
  */
 export interface FleetRequest {
 	readonly op: string;
@@ -34,6 +37,13 @@ export type FleetRunRequest =
 	| { readonly op: "finish"; readonly id: string }
 	/** Drop the run, stopping it if it has not ended. Answers `null`. */
 	| { readonly op: "release"; readonly id: string };
+
+/**
+ * Give the contract `name`, at the newest version the service implements within `range`, or of all
+ * without one: answers `{ name, version, description }`, and sends the contract after it, as a tar
+ * archive (docs/spec/serialization.md#contracts).
+ */
+export type FleetContractRequest = { readonly op: "contract"; readonly name: string; readonly range?: string };
 
 /** What the fleet service answers a request with: JSON, and the bytes that follow it, for an op that sends them. */
 export interface FleetAnswer {
@@ -90,6 +100,21 @@ export function createFleetAdaptor({ transport, project }: FleetOptions): WireAd
 			const request: FleetRunRequest = { op: "release", id };
 			await transport.exchange(request);
 		},
+		async contract(name, range, dir, signal) {
+			const request: FleetContractRequest = { op: "contract", name, ...(range === undefined ? {} : { range }) };
+			const { value, body } = await transport.exchange(request, undefined, signal);
+			const broke = (problem: string): Error => new Error(`the fleet service broke the protocol: ${problem}`);
+			const said = isObject(value) ? value : {};
+			if (typeof said.name !== "string" || typeof said.version !== "string" || typeof said.description !== "string")
+				throw broke(`contract answered ${JSON.stringify(value)}, not { name, version, description }`);
+			if (body === undefined) throw broke("contract sent no contract");
+			const contract = await unpackContract(body, dir, range === undefined ? { name } : { name, range });
+			if (contract.version !== said.version || contract.description !== said.description) {
+				await rm(dir, { recursive: true, force: true });
+				throw broke(`contract said ${said.name}@${said.version}, but sent ${contract.name}@${contract.version}`);
+			}
+			return contract;
+		},
 	};
 }
 
@@ -138,6 +163,23 @@ export function readFleetRunRequest(request: FleetRequest): FleetRunRequest | un
 		default:
 			return undefined;
 	}
+}
+
+/**
+ * `request` as a request for a contract, its fields checked, as from a client the service does not
+ * trust; or undefined, when its op is not `contract`.
+ * @throws for one that lacks what it takes, or takes what it does not.
+ */
+export function readFleetContractRequest(request: FleetRequest): FleetContractRequest | undefined {
+	const { op, ...fields } = request;
+	if (op !== "contract") return undefined;
+	const extra = Object.keys(fields).find((key) => key !== "name" && key !== "range");
+	if (extra !== undefined) throw new TypeError(`contract takes no ${extra}`);
+	const { name, range } = fields;
+	if (typeof name !== "string" || !PACKAGE_NAME.test(name)) throw new TypeError("contract takes name, a contract's, an npm package's");
+	if (range === undefined) return { op, name };
+	if (typeof range !== "string" || rangeVersion(range) === undefined) throw new TypeError("contract takes range, ^ and a version, if anything");
+	return { op, name, range };
 }
 
 async function* empty(): AsyncGenerator<Uint8Array> {}

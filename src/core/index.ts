@@ -2,7 +2,7 @@
  * `@sleepymug/tau/core`: the tau format and the semantics of a run, which the client and the
  * backend SDK share: JSON and paths, and nothing of how a run's files travel (docs/spec/protocol.md).
  */
-export { API_SCOPE, type Api, type Contract, type Exposed, parseVersion, readContract, serves } from "./apis.js";
+export { type Api, type Contract, compareVersions, type Exposed, PACKAGE_NAME, parseVersion, rangeVersion, readContract, serves, within } from "./apis.js";
 export { checkReport, inputKinds, outputKinds, readEnvelope, readReport } from "./forms.js";
 export {
 	type CallFile,

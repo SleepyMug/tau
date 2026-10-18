@@ -9,7 +9,7 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 |---|---|
 | **tau** | An agent packaged as a directory: Transportable Agent Unit. Written TAU where a model reads it, as in TAU.md and TAU_DEV.md. |
 | **prompt** | `PROMPT.md`, what the agent is asked, with its placeholders. |
-| **metadata** | `tau.json`: the tau's description, files, args, what it exposes, and its init. |
+| **metadata** | `tau.json`: the tau's description, files, args, APIs, what it exposes, and its init. |
 | **file** | A file or a directory of the caller's that the tau takes, by its **name**, which `files` in `tau.json` declares, with its mode, its kind and a description, as what the prompt and init need. A file of kind `dir` is a directory: file as Unix means it. Files do not nest. |
 | **mode** | What the agent does with a file: `in`, reads it; `out`, leaves something there; `inout`, changes it in place. |
 | **kind** | What a file is: `file` or `dir`; a file declared without one may be either. |
@@ -19,17 +19,19 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | **scope** | What a run's placeholders name, each by its first name: `self`, its files and its args, one name naming one thing. |
 | **escaped** | A placeholder preceded by `$`: expanding drops one `$` from each run of `$` before a `{`, so `$${name}` is a literal `${name}`, which an agent passes on to a run it makes. |
 | **self** | The tau's own directory, as `${self}` names it. |
-| **API** | `api/<alias>/`: a copy of a contract, what the tau's code calls, imported as `@api/<alias>`. |
-| **alias** | An API's directory's name in `api/`, the tau's own, by which programs import it. |
-| **contract** | An API as it is published: an npm package of TypeScript declarations, its name and version its identity. |
-| **declarations** | A contract's `index.d.ts`, and the declaration files it imports: the whole contract, its doc comments saying what each does. |
+| **API** | A contract the tau's code calls, which `apis` in `tau.json` names with a range, and programs import by its name. |
+| **contract** | An API as it is published, on a registry or by a backend alone: an npm package of TypeScript declarations, its name and version its identity. |
+| **declarations** | A contract's `index.d.ts`, and the declaration files it imports: the whole contract, its doc comments saying what each does. The runtime shows them to the agent; the tau holds none. |
 | **version** | A contract's SemVer version; a version **serves** another when code written for that one works with it: the same major, a minor no less, and, under 1.0.0, the same minor. |
-| **implementation** | The module a runtime gives for an API: of its contract, at a version that serves the tau's copy. |
-| **package** | Code of the tau's own, in its `node_modules/`, built on its APIs. |
+| **range** | `^` and a version, which an API has in `apis`: the versions that serve that one. |
+| **implementation** | The module a runtime gives for an API: of its contract, at a version that serves the tau's range. |
+| **package** | Code of the tau's own, in its `node_modules/`, built on its APIs, which its `package.json` names in `tau.apis`. |
 | **exposes** | What the agent's programs import: APIs, and packages of the tau's own. |
 | **skill** | `skills/<name>/`, with a `SKILL.md`, which the agent can use. |
 | **init** | A command a runtime runs before the agent, which may **skip** it, doing the run itself, **run** it, or **fall back** to it, having failed. |
-| **tau API** | The contract `@sleepymug/tau-api`, by convention `@api/tau`: a run's files and args, runs of other taus, and init's exit codes. |
+| **tau API** | The contract `@sleepymug/tau-api`, imported by that name: a run's files and args, runs of other taus, and init's exit codes. |
+| **`.tau/`** | The `tau` command's, in a tau: each API's contract, pulled for its author, a **lock** of where each came from, and a `tsconfig.json` mapping each to its declarations. No runtime reads it; no client carries it. |
+| **source** | Where the `tau` command pulls a contract from: npm, a wire adaptor's backend, or a directory. |
 
 ## A run
 
@@ -68,11 +70,12 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | **delivery** | Where the client asks its adaptor to put a run's outputs: the run's files, and their targets. |
 | **envelope** | A call, checked, without the caller's paths: each file's mode, base name and kind, and the args. |
 | **report** | How a run ended, and the kind of each output it gives back. |
-| **submit**, **finish**, **release** | A run's life, the whole contract of a wire adaptor and its backend: hand it over; have its latest result put at the targets, as often as asked; drop it, stopping it if it has not ended. |
+| **submit**, **finish**, **release** | A run's life, the whole contract of a run, of a wire adaptor and its backend: hand it over; have its latest result put at the targets, as often as asked; drop it, stopping it if it has not ended. |
+| **contract**, as an adaptor's verb | Have the backend give a contract it implements, the newest within a range, for a tau's author: no run uses it. |
 | **wait** | The client's verb, in the SDK and the `tau` command: finish, then release; no adaptor or backend sees it. |
 | **content** | A file or a directory as a stream of entries, which the transfer helpers read, check and make: the tau's, an input's, or an output's. |
 | **run store** | Where the client keeps each run it started, by its id, until it is released: its adaptor, its files, and its targets. |
-| **implementation catalog** | Where a backend finds the implementation that serves each API. |
+| **implementation catalog** | Where a backend finds the implementation that serves each API, and the declarations of its contract. |
 
 ## Names no longer used
 
@@ -85,12 +88,13 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | `path`, as a kind | A file declared without a kind. |
 | JSON Pointer, blob id | A file's name, which keys outputs and names content in an archive. |
 | `bind`, `BoundFile`, `Placing`, a file's `host` and `view` | `resolve`, a call on the caller's side, with its paths; `check`, an envelope on the backend's; `expand`, with each file's place. |
-| an API's name, an API declared for its tau, which may declare less than an implementation | An alias, and the contract the tau holds a copy of, whole: packages of the tau's own, and `exposes`, shape what the model sees. |
-| an implementation that fits an API, `checkImplementation`, `loadApis`, `loadExposed` | One of the API's contract, at a version that serves the tau's copy, matched by name and version; `loadTau` reads the APIs and what the tau exposes. |
+| an API's name, an API declared for its tau, which may declare less than an implementation | The contract, by its name and a range, whole: packages of the tau's own, and `exposes`, shape what the model sees. |
+| `api/<alias>/`, a copy of a contract in the tau; an alias; `@api/<alias>` | `apis`, a contract's name and a range; the contract's name, which programs import; the declarations, which the runtime gives, and `.tau/` keeps for the author. |
+| an implementation that fits an API, `checkImplementation`, `loadApis`, `loadExposed` | One of the API's contract, at a version within the tau's range, matched by name and version; `loadTau` reads the APIs and what the tau exposes. |
 | the library, `Runtime`, `runTau`, `placeCall`, `applyResult`, `CheckedCall`, `call.json`'s `tau` | The client and its wire adaptors, `client.run`, the backend SDK's `admit` and `place`, an adaptor's `finish`; an envelope, which always comes with its tau. |
 | backend, as the client's link; remote service; server SDK | A wire adaptor; a backend; the backend SDK. |
 | parcel, a call or a result as JSON with its contents | An envelope or a report, and the paths of a job or a delivery: contents are the adaptor's and the backend's, with the transfer helpers. |
 | cancel | Release, which stops a run that has not ended. |
-| `@sleepymug/tau-dev`: `tau check` type-checking a tau, `tau add`, `tau update`, `tau contract` | Nothing, for now: the `tau` command checks a tau without TypeScript. |
+| `@sleepymug/tau-dev`: `tau check` type-checking a tau, `tau add`, `tau update`, `tau contract` | `tau api add`, `remove` and `sync`, and `.tau/tsconfig.json`, for the author's TypeScript; the `tau` command checks a tau without TypeScript. |
 | `@packageDocumentation`, as what describes an API or a package | Its `package.json`'s `description`. |
 | `at`, `share`, `role`, `vars`, `paths`; `args` as a positional list | Earlier designs: places were declared, then are the runtime's; `share` and `role` became modes; texts and paths became files and args. |

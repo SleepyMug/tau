@@ -11,6 +11,7 @@ import { fileRunStore, type RunStore } from "../client/store.js";
 import type { Outcome } from "../core/model.js";
 import { loadTau } from "../core/tau.js";
 import { messageOf } from "../core/util.js";
+import { addApi, removeApi, syncApis } from "./api.js";
 import { type CliConfig, configFile, loadConfig } from "./config.js";
 
 /** The `tau` command (docs/spec/client.md#the-tau-command). */
@@ -26,6 +27,11 @@ const USAGE = [
 	"                                          final text; the run is kept, and may finish again",
 	"       tau release <run>                  drop a run, stopping it if it has not ended",
 	"       tau wait <run> [--json]            finish a run, then release it",
+	"       tau api add <name>[@<range>] [--from <source>] [dir]",
+	"                                          pull an API's contract into the tau's .tau/, and name it",
+	"                                          in its apis: from npm, the default, an adaptor, or a path",
+	"       tau api remove <name> [dir]        take an API out of the tau, and its contract out of .tau/",
+	"       tau api sync [dir]                 pull each API's contract .tau/ lacks, from where it came",
 	"",
 	"A call is JSON, {\"files\": {...}, \"args\": {...}}: --call <file>, - for stdin, or --call-json '<json>'.",
 	"Its paths are relative to the working directory. Without one, the call is {}.",
@@ -52,6 +58,8 @@ export interface CliContext {
 	readonly adaptors?: { readonly [name: string]: WireAdaptor };
 	/** Where runs are kept between commands; by default files in the state directory. */
 	readonly runs?: RunStore;
+	/** What reaches the npm registry, for `tau api`; by default the global `fetch`. */
+	readonly fetch?: typeof fetch;
 	/** Aborted when the command is interrupted: a run started by `run` is released, and `finish` and `wait` stop waiting. */
 	readonly signal?: AbortSignal;
 }
@@ -90,6 +98,11 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 	if (values.help === true) {
 		context.stdout(`${USAGE}\n`);
 		return 0;
+	}
+	if (command === "api") return api(target, rest, values.from, context);
+	if (values.from !== undefined) {
+		context.stderr(`tau: --from is tau api add's\n${USAGE}\n`);
+		return 2;
 	}
 	const arity: Readonly<Record<string, number>> = { check: 1, describe: 1, run: 1, start: 1, finish: 1, release: 1, wait: 1 };
 	if (command === undefined || arity[command] === undefined || target === undefined || rest.length > 0) {
@@ -154,6 +167,7 @@ function parse(argv: readonly string[]) {
 			call: { type: "string" },
 			"call-json": { type: "string" },
 			adaptor: { type: "string" },
+			from: { type: "string" },
 			json: { type: "boolean" },
 			help: { type: "boolean", short: "h" },
 		},
@@ -176,6 +190,38 @@ async function readCall(values: ReturnType<typeof parse>["values"], context: Cli
 	}
 }
 
+/** `tau api <command> …`, in the working directory's tau unless one is named. */
+async function api(command: string | undefined, args: readonly string[], from: string | undefined, context: CliContext): Promise<number> {
+	const takes: Readonly<Record<string, [number, number]>> = { add: [1, 2], remove: [1, 2], sync: [0, 1] };
+	const [least, most] = takes[command ?? ""] ?? [-1, -1];
+	if (args.length < least || args.length > most || (from !== undefined && command !== "add")) {
+		context.stderr(`${USAGE}\n`);
+		return 2;
+	}
+	const named = command === "sync" ? args[0] : args[1];
+	const dir = path.resolve(context.cwd, named ?? ".");
+	try {
+		const config = await loadConfig(configFile(context.env));
+		const apiContext = {
+			adaptors: context.adaptors ?? defaultAdaptors(stateDir(context.env), context.env, context.cwd, config),
+			env: context.env,
+			...(context.fetch === undefined ? {} : { fetch: context.fetch }),
+			...(context.signal === undefined ? {} : { signal: context.signal }),
+		};
+		const said =
+			command === "add"
+				? await addApi(dir, args[0] as string, from, context.cwd, apiContext)
+				: command === "remove"
+					? await removeApi(dir, args[0] as string)
+					: await syncApis(dir, apiContext);
+		context.stdout(`${said}\n`);
+		return 0;
+	} catch (error) {
+		context.stderr(`tau: ${messageOf(error)}\n`);
+		return 1;
+	}
+}
+
 /** What a tau takes, and what it needs, for whoever runs it. */
 function describe(dir: string): object {
 	const tau = loadTau(dir);
@@ -184,7 +230,7 @@ function describe(dir: string): object {
 		...(tau.description === undefined ? {} : { description: tau.description }),
 		files: tau.files,
 		...(tau.args === undefined ? {} : { args: tau.args }),
-		apis: tau.apis.map(({ alias, contract, version, description }) => ({ alias, contract, version, description })),
+		apis: Object.fromEntries(tau.apis.map(({ name, range }) => [name, range])),
 		exposes: tau.exposed.map(({ specifier }) => specifier),
 		skills: tau.skills.map(({ name }) => name),
 		...(tau.init === undefined ? {} : { init: tau.init }),

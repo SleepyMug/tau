@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
+import { PACKAGE_NAME, rangeVersion } from "./apis.js";
 import { type FileDeclaration, type Json, KINDS, type Kind, MODES, type Mode, NAME, SELF } from "./model.js";
 import { isObject, messageOf, refuseKeys } from "./util.js";
 
@@ -10,6 +11,8 @@ export interface Metadata {
 	readonly args: { readonly [keyword: string]: Json } | undefined;
 	/** What checks args against `args`; undefined when the tau takes none. */
 	readonly validate: ValidateFunction | undefined;
+	/** The APIs, from each contract's name to a range: `^` and a version. */
+	readonly apis: { readonly [name: string]: string } | undefined;
 	readonly exposes: readonly string[] | undefined;
 	readonly init: string | undefined;
 }
@@ -27,11 +30,17 @@ export function readMetadata(file: string): Metadata {
 			throw new TypeError(`is not JSON: ${messageOf(error)}`);
 		}
 		if (!isObject(json)) throw new TypeError("must be an object");
-		const { description, files = {}, args, exposes, init, ...rest } = json;
+		const { description, files = {}, args, apis, exposes, init, ...rest } = json;
 		refuseKeys(rest, "tau.json");
 		if (description !== undefined && typeof description !== "string")
 			throw new TypeError("`description` must be a string");
 		if (!isObject(files)) throw new TypeError("`files` must be an object, from each file's name to what it is");
+		if (apis !== undefined && !isObject(apis)) throw new TypeError("`apis` must be an object, from each contract's name to a range");
+		for (const [name, range] of Object.entries(apis ?? {})) {
+			if (!PACKAGE_NAME.test(name) || name.length > 214) throw new TypeError(`\`apis\`: ${JSON.stringify(name)} is not a contract's name, an npm package's`);
+			if (typeof range !== "string" || rangeVersion(range) === undefined)
+				throw new TypeError(`\`apis\`: ${name}: ${JSON.stringify(range)} is not a range, ^ and a SemVer version, as ^1.2.0`);
+		}
 		if (exposes !== undefined && !Array.isArray(exposes)) throw new TypeError("`exposes` must be an array");
 		if (init !== undefined && (typeof init !== "string" || init.trim() === ""))
 			throw new TypeError("`init` must be a command, a string that is not blank");
@@ -56,6 +65,7 @@ export function readMetadata(file: string): Metadata {
 			files: declared,
 			args: args as { [keyword: string]: Json } | undefined,
 			validate,
+			apis: apis as { readonly [name: string]: string } | undefined,
 			exposes: exposes === undefined ? undefined : [...exposed],
 			init,
 		};

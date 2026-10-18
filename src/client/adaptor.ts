@@ -1,3 +1,4 @@
+import type { Contract } from "../core/apis.js";
 import type { Delivery, Job, Report } from "../core/model.js";
 
 /**
@@ -25,4 +26,12 @@ export interface WireAdaptor {
 	/** Let the backend drop the run `id`, stopping it if it has not ended; then `finish` knows it no more. */
 	release(id: string): Promise<void>;
 	// No `wait`: the client's is `finish`, then `release`, each made here.
+	/**
+	 * Optional, and no run uses it (docs/spec/protocol.md#contracts): put at `dir`, which does not
+	 * exist, the contract `name`, its package.json and declarations, at the newest version the
+	 * backend implements within `range`, or of all without one, checked as from a backend the
+	 * adaptor does not trust, and give its name, version and description.
+	 * @throws when the backend implements no such version.
+	 */
+	contract?(name: string, range: string | undefined, dir: string, signal?: AbortSignal): Promise<Contract>;
 }

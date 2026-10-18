@@ -64,9 +64,9 @@ Compressing the archive, as a whole, is up to whatever carries it.
   content in the archive, at `files/<name>`; an `out` has none, since what its place holds at
   first is not specified.
 - `args` are the call's args, as the caller gave them, their placeholders not yet expanded.
-- The tau is the directory at `tau/`, as [Directory](directory.md) has it, whose symlinks lead
-  inside it. It comes first, so that the backend can read the tau, and check the call against it,
-  before it reads the files.
+- The tau is the directory at `tau/`, as [Directory](directory.md) has it, without its `.tau/`, and
+  whose symlinks lead inside it. It comes first, so that the backend can read the tau, and check the
+  call against it, before it reads the files.
 
 Every content in the archive is a file's that `files` names with content, or the tau's.
 
@@ -123,6 +123,23 @@ A result says what to put where by the files' names, never by the caller's paths
 holds. A caller that keeps the path of each of its `out` and `inout` files puts each output at its
 file's path, as [Results](results.md) says: a directory merging into a directory already there,
 anything else replacing what is there.
+
+## Contracts
+
+A contract, as a backend gives it to an adaptor that asks for it (see
+[Protocol](protocol.md#contracts)), may be an archive too, restricted as above but for its first
+entry: it holds no JSON, which whatever carries it sends beside it, and its one content is the
+contract's, a directory at `contract/`, holding its `package.json` and its declarations, where
+the package has them, and no symlink. `packContract(dir)` writes one from a contract's package;
+`unpackContract(bytes, dir, { name, range })` reads one into `dir`, and checks it as a contract of
+that name, at a version within `range`.
+
+```
+contract/
+contract/package.json
+contract/index.d.ts
+contract/tags.d.ts
+```
 
 ## Open
 
