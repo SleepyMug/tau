@@ -31,7 +31,8 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | **init** | A command a runtime runs before the agent, which may **skip** it, doing the run itself, **run** it, or **fall back** to it, having failed. |
 | **tau API** | The contract `@sleepymug/tau-api`, imported by that name: a run's files and args, runs of other taus, and init's exit codes. |
 | **`.tau/`** | The `tau` command's, in a tau: each API's contract, pulled for its author, a **lock** of where each came from, and a `tsconfig.json` mapping each to its declarations. No runtime reads it; no client carries it. |
-| **source** | Where the `tau` command pulls a contract from: npm, a wire adaptor's backend, or a directory. |
+| **source** | Where the `tau` command pulls a contract from: npm, a directory, or the provider. |
+| **provider** | The backend of the wire adaptor a run goes through, as the `tau` command chooses it, as a source of the contracts it implements. |
 
 ## A run
 

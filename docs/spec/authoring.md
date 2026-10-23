@@ -9,20 +9,23 @@ command pulls each API's contract for its author, from wherever it is published,
 ## The APIs
 
 ```
-tau api add <name>[@<range>] [--from <source>] [dir]
+tau api add <name>[@<range>] [--from <npm|path> | --from-provider] [dir]
 tau api remove <name> [dir]
 tau api sync [dir]
 ```
 
 - **`add`** pulls the contract `name`, at the version `range` gives, `1.2.0` for `^1.2.0`, or,
   without one, the newest its source has, keeps it in `.tau/`, and adds it to `apis`, at `range`,
-  or at `^` and the version pulled. `--from` says where the contract is published:
-  - `npm`, the npm registry, `$npm_config_registry` or npm's own, as `npm` would install it: the
-    default;
-  - the name of a wire adaptor, `fleet`, whose backend gives the contracts it implements (see
-    [Protocol](protocol.md#contracts));
-  - a path, one that holds a `/` or starts with a `.`, to a contract's package directory, such as
-    one its publisher is writing.
+  or at `^` and the version pulled, from its **source**, where the contract is published:
+  - `--from npm`, the npm registry, `$npm_config_registry` or npm's own, as `npm` would install
+    it: the default;
+  - `--from <path>`, a path, one that holds a `/` or starts with a `.`, to a contract's package
+    directory, such as one its publisher is writing;
+  - `--from-provider`, the **provider**: the backend of the wire adaptor a run goes through, as
+    `--adaptor`, `$TAU_ADAPTOR` or the config file chooses it (see
+    [Client](client.md#the-tau-command)), which gives the contracts it implements (see
+    [Protocol](protocol.md#contracts)), such as the fleet service, for the contracts its
+    extensions implement.
 - **`remove`** takes it out of `apis`, and out of `exposes`, and its contract out of `.tau/`.
 - **`sync`** pulls each API's contract that `.tau/` lacks, or holds at another version than its
   range gives, from where `.tau/lock.json` says it came, or else from npm, and drops those of no
@@ -51,15 +54,15 @@ author's, and no runtime asks, since it implements an API by its name and versio
 ```json
 {
   "contracts": {
-    "@acme/travel": { "version": "1.2.0", "from": "fleet" },
+    "@acme/travel": { "version": "1.2.0", "from": "provider" },
     "@sleepymug/tau-api": { "version": "0.1.0", "from": "npm" }
   }
 }
 ```
 
 `lock.json` says, for each API, the version of its contract `.tau/contracts/` holds, the one its
-range gives, and its source, `npm`, an adaptor's name, or a path, relative to the tau, so that
-`sync` pulls the same contracts again; the rest of `.tau/` is made from it, and is not kept with
+range gives, and its source, `npm`, a path, relative to the tau, or `provider`, whichever the
+provider is where `sync` runs, so that `sync` pulls the same contracts again; the rest of `.tau/` is made from it, and is not kept with
 the tau's sources.
 
 `tsconfig.json` maps each API to its declarations, by `paths`:

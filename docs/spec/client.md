@@ -98,7 +98,7 @@ tau trace <run>
 tau finish <run> [--json]
 tau release <run>
 tau wait <run> [--json] [--trace <file>]
-tau api add <name>[@<range>] [--from <source>] [dir]
+tau api add <name>[@<range>] [--from <npm|path> | --from-provider] [dir]
 tau api remove <name> [dir]
 tau api sync [dir]
 ```

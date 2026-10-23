@@ -60,9 +60,9 @@ console.log(`The trip was booked already; wrote its itinerary, from ${bookings.l
   TypeScript Node.js runs as is, its types stripped. They import what `exposes` lists, by default
   every API, resolving from the TAU's directory, as its own code does. `node_modules/` holds
   packages of the TAU's own, built on its APIs.
-- **The contracts, for its author**: `tau api add @acme/travel --from fleet` pulls one, from npm,
-  the default, a wire adaptor's backend, or a path, into `.tau/`, and names it in `apis`;
-  `tau api sync` pulls them again after a clone. A `tsconfig.json` with
+- **The contracts, for its author**: `tau api add @acme/travel --from-provider` pulls one, from
+  npm, the default, a path, or the provider, the runtime the `tau` command runs on, into `.tau/`,
+  and names it in `apis`; `tau api sync` pulls them again after a clone. A `tsconfig.json` with
   `"extends": "./.tau/tsconfig.json"` type-checks the TAU's code against them. A package of the
   TAU's own names the APIs it imports in its `package.json`'s `"tau": { "apis": { … } }`, and its
   build leaves their imports as they are.

@@ -331,17 +331,20 @@ test("tau api add pulls from a path, or an adaptor's backend; sync pulls again w
 	const adaptors = { fleet: createFleetAdaptor({ transport: fleetLoopback(fleet.handle) }), dummy: createDummyAdaptor({ spool: path.join(tmp, "api-dummy") }) };
 	assert.equal((await tauIn(home, ["api", "add", "@acme/notes@^0.2.0", "--from", path.relative(home, path.join(contracts, "notes")), dir])).stdout,
 		"@acme/notes@^0.2.0: its contract at 0.2.0, from ../published/notes\n");
-	assert.equal((await tauIn(dir, ["api", "add", "clock", "--from", "fleet"], { adaptors })).stdout, "clock@^1.0.0: its contract at 1.0.0, from fleet\n");
-	assert.deepEqual(await tauIn(dir, ["api", "add", "clock", "--from", "dummy"], { adaptors }), { code: 1, stdout: "", stderr: "tau: the dummy adaptor gives no contracts\n" });
+	// The provider is the adaptor a run goes through: here --adaptor's, and the dummy's without one.
+	assert.equal((await tauIn(dir, ["api", "add", "clock", "--from-provider", "--adaptor", "fleet"], { adaptors })).stdout, "clock@^1.0.0: its contract at 1.0.0, from provider\n");
+	assert.deepEqual(await tauIn(dir, ["api", "add", "clock", "--from-provider"], { adaptors }), { code: 1, stdout: "", stderr: "tau: the provider, the dummy adaptor, gives no contracts\n" });
 	assert.deepEqual(JSON.parse(readFileSync(path.join(dir, ".tau/lock.json"), "utf8")), {
-		contracts: { "@acme/notes": { version: "0.2.0", from: "../published/notes" }, clock: { version: "1.0.0", from: "fleet" } },
+		contracts: { "@acme/notes": { version: "0.2.0", from: "../published/notes" }, clock: { version: "1.0.0", from: "provider" } },
 	});
 	assert.equal(existsSync(path.join(dir, ".tau/contracts/@acme/notes/src")), false);
 
 	// As a clone has it: lock.json alone.
 	for (const entry of readdirSync(path.join(dir, ".tau"))) if (entry !== "lock.json") rmSync(path.join(dir, ".tau", entry), { recursive: true });
 	mkdirSync(path.join(dir, ".tau/contracts/stale"), { recursive: true });
-	assert.equal((await tauIn(dir, ["api", "sync"], { adaptors })).stdout, "pulled @acme/notes@0.2.0, from ../published/notes; clock@1.0.0, from fleet\n");
+	// Whichever the provider is where it runs: here $TAU_ADAPTOR's.
+	const env = { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(tmp, "no-config.yaml"), TAU_ADAPTOR: "fleet" };
+	assert.equal((await tauIn(dir, ["api", "sync"], { adaptors, env })).stdout, "pulled @acme/notes@0.2.0, from ../published/notes; clock@1.0.0, from provider\n");
 	assert.deepEqual(readdirSync(path.join(dir, ".tau/contracts")).sort(), ["@acme", "clock"]);
 	assert.equal((await tauIn(dir, ["api", "sync"], { adaptors })).stdout, "every contract is in .tau/ already\n");
 
@@ -361,10 +364,14 @@ test("tau api refuses what it cannot do, and a command line that is not one", as
 	const dir = write("refusing", { "PROMPT.md": "Hi.\n" });
 	assert.equal((await tauIn(dir, ["api", "add", "Clock"])).stderr, 'tau: "Clock" is not a contract\'s name, an npm package\'s\n');
 	assert.equal((await tauIn(dir, ["api", "add", "clock@1.0.0"])).stderr, 'tau: "1.0.0" is not a range, ^ and a version, as ^1.2.0\n');
-	assert.equal((await tauIn(dir, ["api", "add", "clock", "--from", "elsewhere"], { adaptors: {} })).stderr, 'tau: no source "elsewhere": npm, a path\n');
+	assert.equal((await tauIn(dir, ["api", "add", "clock", "--from", "fleet"])).stderr,
+		'tau: no source "fleet": --from takes npm or a path, one that holds a / or starts with a .; --from-provider pulls from the provider\n');
+	assert.equal((await tauIn(dir, ["api", "add", "clock", "--from", "npm", "--from-provider"])).stderr, "tau: give a source once: --from, or --from-provider\n");
+	assert.equal((await tauIn(dir, ["api", "sync", "--from-provider"])).code, 2);
 	assert.equal((await tauIn(dir, ["api", "remove", "clock"])).stderr, `tau: ${dir}/tau.json: \`apis\` names no clock\n`);
 	assert.equal((await tauIn(tmp, ["api", "sync"])).stderr, `tau: ${tmp}: not a tau (no PROMPT.md)\n`);
 	assert.equal((await tauIn(dir, ["api", "list"])).code, 2);
 	assert.equal((await tauIn(dir, ["api", "sync", "--from", "npm"])).code, 2);
 	assert.equal((await tauIn(dir, ["check", ".", "--from", "npm"])).code, 2);
+	assert.equal((await tauIn(dir, ["check", ".", "--from-provider"])).code, 2);
 });

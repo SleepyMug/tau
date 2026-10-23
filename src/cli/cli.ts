@@ -34,9 +34,10 @@ const USAGE = [
 	"       tau release <run>                  drop a run, stopping it if it has not ended",
 	"       tau wait <run> [--json] [--trace <file>]",
 	"                                          finish a run, then release it",
-	"       tau api add <name>[@<range>] [--from <source>] [dir]",
+	"       tau api add <name>[@<range>] [--from <npm|path> | --from-provider] [dir]",
 	"                                          pull an API's contract into the tau's .tau/, and name it",
-	"                                          in its apis: from npm, the default, an adaptor, or a path",
+	"                                          in its apis: from npm, the default, a path, or the provider,",
+	"                                          the backend of the adaptor a run goes through",
 	"       tau api remove <name> [dir]        take an API out of the tau, and its contract out of .tau/",
 	"       tau api sync [dir]                 pull each API's contract .tau/ lacks, from where it came",
 	"",
@@ -108,9 +109,9 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 		context.stdout(`${USAGE}\n`);
 		return 0;
 	}
-	if (command === "api") return api(target, rest, values.from, context);
-	if (values.from !== undefined) {
-		context.stderr(`tau: --from is tau api add's\n${USAGE}\n`);
+	if (command === "api") return api(target, rest, values, context);
+	if (values.from !== undefined || values["from-provider"] !== undefined) {
+		context.stderr(`tau: --from and --from-provider are tau api add's\n${USAGE}\n`);
 		return 2;
 	}
 	const arity: Readonly<Record<string, number>> = { check: 1, describe: 1, run: 1, start: 1, status: 1, result: 1, trace: 1, finish: 1, release: 1, wait: 1 };
@@ -203,6 +204,7 @@ function parse(argv: readonly string[]) {
 			"call-json": { type: "string" },
 			adaptor: { type: "string" },
 			from: { type: "string" },
+			"from-provider": { type: "boolean" },
 			json: { type: "boolean" },
 			trace: { type: "string" },
 			help: { type: "boolean", short: "h" },
@@ -234,10 +236,11 @@ async function readCall(values: ReturnType<typeof parse>["values"], context: Cli
 }
 
 /** `tau api <command> …`, in the working directory's tau unless one is named. */
-async function api(command: string | undefined, args: readonly string[], from: string | undefined, context: CliContext): Promise<number> {
+async function api(command: string | undefined, args: readonly string[], values: ReturnType<typeof parse>["values"], context: CliContext): Promise<number> {
+	const { from, "from-provider": provider } = values;
 	const takes: Readonly<Record<string, [number, number]>> = { add: [1, 2], remove: [1, 2], sync: [0, 1] };
 	const [least, most] = takes[command ?? ""] ?? [-1, -1];
-	if (args.length < least || args.length > most || (from !== undefined && command !== "add")) {
+	if (args.length < least || args.length > most || ((from !== undefined || provider !== undefined) && command !== "add")) {
 		context.stderr(`${USAGE}\n`);
 		return 2;
 	}
@@ -247,13 +250,15 @@ async function api(command: string | undefined, args: readonly string[], from: s
 		const config = await loadConfig(configFile(context.env));
 		const apiContext = {
 			adaptors: context.adaptors ?? defaultAdaptors(stateDir(context.env), context.env, context.cwd, config),
+			// The provider is the adaptor a run would go through.
+			provider: values.adaptor ?? context.env.TAU_ADAPTOR ?? config.adaptor ?? "dummy",
 			env: context.env,
 			...(context.fetch === undefined ? {} : { fetch: context.fetch }),
 			...(context.signal === undefined ? {} : { signal: context.signal }),
 		};
 		const said =
 			command === "add"
-				? await addApi(dir, args[0] as string, from, context.cwd, apiContext)
+				? await addApi(dir, args[0] as string, { ...(from === undefined ? {} : { from }), provider: provider === true }, context.cwd, apiContext)
 				: command === "remove"
 					? await removeApi(dir, args[0] as string)
 					: await syncApis(dir, apiContext);

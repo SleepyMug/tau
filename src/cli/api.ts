@@ -15,9 +15,11 @@ import { readTar } from "../wire-tar/tar.js";
  * for its author into `.tau/`, which no runtime reads and no client carries (docs/spec/authoring.md).
  */
 
-/** What `tau api` reaches: the wire adaptors, by name, whose backends give contracts; the npm registry. */
+/** What `tau api` reaches: the provider, whose backend gives contracts; the npm registry. */
 export interface ApiContext {
 	readonly adaptors: { readonly [name: string]: WireAdaptor };
+	/** The adaptor whose backend is the provider: the one a run goes through, as the command chooses it. */
+	readonly provider: string;
 	readonly env: { readonly [name: string]: string | undefined };
 	/** What reaches the npm registry; by default the global `fetch`. */
 	readonly fetch?: typeof fetch;
@@ -30,18 +32,30 @@ interface Lock {
 }
 
 const NPM = "npm";
+/** The source that is the provider, whichever adaptor that is where the command runs. */
+const PROVIDER = "provider";
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 
 /**
- * Pull the contract `spec` names, `<name>[@<range>]`, from `from`, by default npm, into the tau at
- * `dir`'s `.tau/`, and name it in `apis`, at its range, or at `^` and the version pulled.
+ * Pull the contract `spec` names, `<name>[@<range>]`, from `from`, npm, the default, or a path, or
+ * from the provider, into the tau at `dir`'s `.tau/`, and name it in `apis`, at its range, or at
+ * `^` and the version pulled.
  * @param cwd - what a path given as `from` is relative to.
  * @returns what it did, for whoever ran it.
  */
-export async function addApi(dir: string, spec: string, from: string | undefined, cwd: string, context: ApiContext): Promise<string> {
+export async function addApi(
+	dir: string,
+	spec: string,
+	{ from, provider = false }: { readonly from?: string; readonly provider?: boolean },
+	cwd: string,
+	context: ApiContext,
+): Promise<string> {
 	const { name, range } = parseSpec(spec);
 	const tau = tauDir(dir);
-	const source = from === undefined ? NPM : isPath(from) ? path.resolve(cwd, from) : from;
+	if (provider && from !== undefined) throw new Error("give a source once: --from, or --from-provider");
+	if (from !== undefined && from !== NPM && !isPath(from))
+		throw new Error(`no source ${JSON.stringify(from)}: --from takes npm or a path, one that holds a / or starts with a .; --from-provider pulls from the provider`);
+	const source = provider ? PROVIDER : from === undefined ? NPM : isPath(from) ? path.resolve(cwd, from) : from;
 	const contract = await pull(tau, name, range, source, context);
 	const metadata = await readMetadata(tau);
 	const apis = isObject(metadata.apis) ? { ...metadata.apis } : {};
@@ -121,7 +135,7 @@ function tauDir(dir: string): string {
 	return tau;
 }
 
-/** Whether a source is a path: one that holds a `/`, or starts with a `.`; otherwise npm, or an adaptor's name. */
+/** Whether a source is a path: one that holds a `/`, or starts with a `.`; otherwise npm, or the provider. */
 function isPath(from: string): boolean {
 	return from.includes("/") || from.includes(path.sep) || from.startsWith(".");
 }
@@ -147,15 +161,15 @@ async function pull(tau: string, name: string, range: string | undefined, source
 	const scratch = path.join(tau, ".tau", `pulling-${randomUUID()}`);
 	await mkdir(path.join(tau, ".tau"), { recursive: true });
 	try {
-		const where = source === NPM ? "npm" : path.isAbsolute(source) ? source : `the ${source} adaptor's backend`;
+		const where = source === NPM ? "npm" : path.isAbsolute(source) ? source : `the provider, the ${context.provider} adaptor's backend,`;
 		if (source === NPM) await fromNpm(name, wanted, scratch, context);
 		else if (path.isAbsolute(source)) await copyDeclarations(source, scratch);
-		else {
-			const adaptor = context.adaptors[source];
-			if (adaptor === undefined) throw new Error(`no source ${JSON.stringify(source)}: npm, a path${Object.keys(context.adaptors).length === 0 ? "" : `, or an adaptor: ${Object.keys(context.adaptors).join(", ")}`}`);
-			if (adaptor.contract === undefined) throw new Error(`the ${source} adaptor gives no contracts`);
+		else if (source === PROVIDER) {
+			const adaptor = context.adaptors[context.provider];
+			if (adaptor === undefined) throw new Error(`no wire adaptor ${JSON.stringify(context.provider)}, the provider; there are ${Object.keys(context.adaptors).join(", ")}`);
+			if (adaptor.contract === undefined) throw new Error(`the provider, the ${context.provider} adaptor, gives no contracts`);
 			await adaptor.contract(name, range, scratch, context.signal);
-		}
+		} else throw new Error(`no source ${JSON.stringify(source)}: npm, a path, or the provider`);
 		let contract: Contract;
 		try {
 			contract = readContract(scratch);
