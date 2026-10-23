@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { createDummyAdaptor, type DummyAgent, type DummyRun } from "../adaptors/dummy.js";
-import type { Delivery, Job, Report } from "../core/model.js";
+import type { Delivery, Job, Numbered, Report, Status, Trace } from "../core/model.js";
 import type { WireAdaptor } from "./adaptor.js";
 import { createClient } from "./client.js";
 import { fileRunStore } from "./store.js";
@@ -173,36 +173,69 @@ test("a run is finished as often as asked, from any client sharing its run store
 	writeFileSync(path.join(caller, "out", "report.md"), "changed since\n");
 	assert.deepEqual(await other.finish(run), { ok: true, text: "Done." });
 	assert.equal(readFileSync(path.join(caller, "out", "report.md"), "utf8"), "rules: rules\n");
+	assert.deepEqual(await other.status(run), { state: "ended", result: 1, ok: true });
+	assert.deepEqual(await other.result(run), { result: 1, ok: true, text: "Done." });
+	const { format, events } = await other.trace(run);
+	assert.equal(format, "tau-dummy");
+	assert.deepEqual(
+		events.map((event) => (event as { type: string }).type),
+		["admitted", "rendered", "ended"],
+	);
 	await other.release(run);
 	await assert.rejects(other.finish(run), /^Error: no run dummy:/u);
+	await assert.rejects(other.status(run), /^Error: no run dummy:/u);
 	await assert.rejects(other.release(run), /^Error: no run dummy:/u);
 	assert.deepEqual(readdirSync(path.join(tmp, "runs")), []);
 });
 
-/** An adaptor in this process whose runs have a new result each time they finish, once `ready` resolves. */
+/**
+ * An adaptor in this process whose runs end once `ready` resolves, with result {@link results},
+ * which a test moves on, as when a run's agent was asked to do better.
+ */
 class FollowedAdaptor implements WireAdaptor {
 	readonly released: string[] = [];
 	readonly deliveries: Delivery[] = [];
 	submitted = 0;
-	finished = 0;
+	statuses = 0;
+	results = 1;
+	private ended = false;
 
 	constructor(
-		private readonly report: (finished: number) => Report = (finished) => ({ ok: true, text: `result ${finished}`, outputs: { report: { kind: "file" }, pages: { kind: "dir" }, site: { kind: "dir" } } }),
-		private readonly ready: Promise<void> = Promise.resolve(),
-	) {}
+		private readonly report: (result: number) => Report = (result) => ({ ok: true, text: `result ${result}`, outputs: { report: { kind: "file" }, pages: { kind: "dir" }, site: { kind: "dir" } } }),
+		ready: Promise<void> = Promise.resolve(),
+		/** What the trace waits for before it is given. */
+		private readonly traced: Promise<void> = Promise.resolve(),
+	) {
+		void ready.then(() => {
+			this.ended = true;
+		});
+	}
 
 	async submit(): Promise<string> {
 		return `run-${this.submitted++}`;
 	}
 
-	async finish(_id: string, delivery: Delivery, signal?: AbortSignal): Promise<Report> {
+	async status(_id: string, signal?: AbortSignal): Promise<Status> {
 		signal?.throwIfAborted();
+		this.statuses++;
+		if (!this.ended) return { state: "running" };
+		const { ok, failure } = this.report(this.results);
+		return failure === undefined ? { state: "ended", result: this.results, ok } : { state: "ended", result: this.results, ok, failure };
+	}
+
+	async result(_id: string, delivery: Delivery, signal?: AbortSignal): Promise<Numbered> {
+		signal?.throwIfAborted();
+		if (!this.ended) throw new Error("no result yet");
+		this.deliveries.push(delivery);
+		return { result: this.results, report: this.report(this.results) };
+	}
+
+	async trace(_id: string, signal?: AbortSignal): Promise<Trace> {
 		await new Promise<void>((resolve, reject) => {
 			signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-			this.ready.then(resolve);
+			this.traced.then(resolve);
 		});
-		this.deliveries.push(delivery);
-		return this.report(++this.finished);
+		return { format: "followed", events: [{ results: this.results }] };
 	}
 
 	async release(id: string): Promise<void> {
@@ -217,9 +250,16 @@ test("finishing again gives the latest result, and waiting is finishing, then re
 	const run = await client.start(TAU, CALL, { cwd: caller });
 	assert.equal(run, "followed:run-0");
 	assert.deepEqual(await client.finish(run), { ok: true, text: "result 1" });
+	assert.deepEqual(await client.finish(run), { ok: true, text: "result 1" });
+	adaptor.results = 2;
+	assert.deepEqual(await client.status(run), { state: "ended", result: 2, ok: true });
+	assert.deepEqual(await client.result(run), { result: 2, ok: true, text: "result 2" });
 	assert.deepEqual(await client.finish(run), { ok: true, text: "result 2" });
 	assert.deepEqual(adaptor.released, []);
-	assert.deepEqual(await client.wait(run), { ok: true, text: "result 3" });
+	adaptor.results = 3;
+	const traces: Trace[] = [];
+	assert.deepEqual(await client.wait(run, { trace: (trace) => void traces.push(trace) }), { ok: true, text: "result 3" });
+	assert.deepEqual(traces, [{ format: "followed", events: [{ results: 3 }] }]);
 	assert.deepEqual(adaptor.released, ["run-0"]);
 	// The adaptor is told where each output goes, and what the run's files are.
 	assert.deepEqual(adaptor.deliveries[0], {
@@ -232,6 +272,48 @@ test("finishing again gives the latest result, and waiting is finishing, then re
 		},
 		targets: { site: path.join(caller, "site"), report: path.join(caller, "out/report.md"), pages: path.join(caller, "out/pages") },
 	});
+});
+
+test("finishing asks a running run's status, pausing longer each time, until it ended; its result is refused till then", async () => {
+	const caller = home("home-poll");
+	let ready = (): void => {};
+	const adaptor = new FollowedAdaptor(undefined, new Promise((resolve) => (ready = resolve)));
+	const client = createClient({ adaptors: { followed: adaptor } });
+	const run = await client.start(TAU, CALL, { cwd: caller });
+	assert.deepEqual(await client.status(run), { state: "running" });
+	await assert.rejects(client.result(run), /^Error: no result yet$/u);
+	const finishing = client.finish(run);
+	setTimeout(ready, 150);
+	assert.deepEqual(await finishing, { ok: true, text: "result 1" });
+	// Asked at once, after 100 ms, and after 200 more, at most.
+	assert.ok(adaptor.statuses >= 3 && adaptor.statuses <= 4, `asked ${adaptor.statuses} times`);
+	await client.release(run);
+});
+
+test("a trace waiting asks for that cannot be given leaves the run released, and the waiting fails", async () => {
+	const adaptor = new FollowedAdaptor();
+	const client = createClient({ adaptors: { followed: adaptor } });
+	const run = await client.start(TAU, CALL, { cwd: home("home-trace-fails") });
+	await assert.rejects(
+		client.wait(run, {
+			trace: () => {
+				throw new Error("disk full");
+			},
+		}),
+		/^Error: disk full$/u,
+	);
+	assert.deepEqual(adaptor.released, ["run-0"]);
+	await assert.rejects(client.status(run), /^Error: no run followed:/u);
+});
+
+test("aborting a run while its trace is fetched releases it once, and it fails", async () => {
+	const adaptor = new FollowedAdaptor(undefined, undefined, new Promise(() => {}));
+	const controller = new AbortController();
+	const running = createClient({ adaptors: { held: adaptor } }).run(TAU, CALL, { cwd: home("home-abort-trace"), signal: controller.signal, trace: () => {} });
+	while (adaptor.deliveries.length === 0) await new Promise((resolve) => setImmediate(resolve));
+	controller.abort();
+	assert.deepEqual(await running, { ok: false, text: "", failure: "the run was stopped" });
+	assert.deepEqual(adaptor.released, ["run-0"]);
 });
 
 test("aborting a run releases it, and it fails", async () => {

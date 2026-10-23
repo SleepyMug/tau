@@ -22,7 +22,7 @@ the agent with the **backend SDK**, and puts what comes back at the caller's pat
 | `src/transfer` | `@sleepymug/tau/transfer` | Helpers for moving files: contents, checked as they come, and outputs merged at their targets |
 | `src/wire-tar` | `@sleepymug/tau/wire-tar` | Calls and results as tar archives ([serialization.md](docs/spec/serialization.md)) |
 | `src/adaptors` | `@sleepymug/tau/adaptors` | The built-in wire adaptors: `dummy`, a loopback to a backend in the same process, and `fleet`, runs on the fleet service ([fleet.md](docs/spec/fleet.md)) |
-| `src/cli` | the `tau` command | `check`, `describe`, `run`, `start`, `finish`, `release`, `wait` |
+| `src/cli` | the `tau` command | `check`, `describe`, `run`, `start`, `status`, `result`, `trace`, `finish`, `release`, `wait` |
 
 ## Commands
 

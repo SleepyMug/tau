@@ -63,12 +63,31 @@ so that they can do it as well as they know how.
   { "ok": true, "text": "Replaced 12 words.", "outputs": { "site": { "kind": "dir" }, "counts": { "kind": "file" } } }
   ```
 
+- **The status**: where a run is: `running`, until it has a result; then `ended`, with `result`,
+  the latest result's number, counting from 1, `ok`, whether that result succeeded, and `failure`,
+  why, only when it did not. A later result has the next number; the run does not go back to
+  `running`.
+
+  ```json
+  { "state": "ended", "result": 1, "ok": false, "failure": "the agent stopped: out of turns" }
+  ```
+
+- **The trace**: what a run's agent did, so far, for a person looking into the run (see
+  [Traces](#traces)): `format`, the backend's name for the form of its events, and `events`, in
+  order, each anything JSON.
+
+  ```json
+  { "format": "dsh-session-events", "events": [{ "type": "user/message" }, { "type": "turn/end" }] }
+  ```
+
 ## A run's life
 
 ```ts
 interface WireAdaptor {
   submit(job: Job, signal?: AbortSignal): Promise<string>;
-  finish(id: string, delivery: Delivery, signal?: AbortSignal): Promise<Report>;
+  status(id: string, signal?: AbortSignal): Promise<Status>;
+  result(id: string, delivery: Delivery, signal?: AbortSignal): Promise<{ result: number; report: Report }>;
+  trace(id: string, signal?: AbortSignal): Promise<Trace>;
   release(id: string): Promise<void>;
 }
 ```
@@ -76,24 +95,40 @@ interface WireAdaptor {
 - **Submit.** The adaptor hands the run to its backend, which may refuse it: a call that does not
   fit the tau, or an API it implements at no version that serves the tau's range. It gives the
   run's **id**, which means the same run to it in any process.
-- **Finish.** The adaptor waits until the run has a result, puts its outputs at the targets, as
-  [Results](results.md) has it, a directory merging into one there, and gives its report. It
-  deletes nothing, here or on the backend, and may be asked again: each time it gives a whole
-  result, the latest, which need not be the same, as when the agent has since been asked to
-  improve it, and puts its outputs again, merging as before, so what an earlier result alone left
-  in a directory stays. Aborting the waiting stops the waiting, not the run.
-- **Release.** The backend drops the run, stopping it if it has not ended; then nothing finishes it.
-  There is no other way to stop a run.
+- **Status.** The adaptor gives the run's status, at once: running, or ended, with its latest
+  result's number and how that result ended.
+- **Result.** The adaptor puts the outputs of the run's latest result at the targets, as
+  [Results](results.md) has it, a directory merging into one there, and gives the result's number
+  and its report, at once. It refuses a run that has no result yet. It deletes nothing, here or on
+  the backend, and may be asked again: each time it gives a whole result, the latest, which need
+  not be the same, as when the agent has since been asked to improve it, and puts its outputs
+  again, merging as before, so what an earlier result alone left in a directory stays.
+- **Trace.** The adaptor gives the run's trace, what its agent did so far, whether the run has
+  ended or not (see [Traces](#traces)).
+- **Release.** The backend drops the run, stopping it if it has not ended; then nothing else
+  knows it. There is no other way to stop a run.
 
-These three are the whole contract of a run, of an adaptor and of the backend behind it. **Wait** is
-not among them: it is the client's verb, in the SDK and the `tau` command, and it is finish, then
-release, each made as above, so an adaptor and a backend never see a wait.
+These five are the whole contract of a run, of an adaptor and of the backend behind it: none of
+them waits for the run. **Finish** and **wait** are not among them: they are the client's verbs, in
+the SDK and the `tau` command. Finish asks the run's status until it has ended, pausing between,
+each pause longer than the last, then asks for its result; wait finishes the run, then releases
+it. So an adaptor and a backend never see a finish or a wait.
 
 The client keeps, for each run it started, its adaptor, its id, and its delivery, in a **run
 store**, until it is released, so that whoever finishes or releases the run, in the process that
 started it or another sharing the store, can. Runs nest: an agent's program that runs a tau,
 through the tau API, is the caller of that run (see [The tau API](tau-api.md)), and the backend
 can make it as a client does.
+
+## Traces
+
+Every run has a trace, from when it is submitted until it is released, which its backend keeps:
+what its agent did, its turns and the tools it called, and init, if it ran, as far as the run got,
+as the backend records it. It is for a person looking into a run, not a result (see
+[Results](results.md)): its `format` is the backend's to name, and what its events hold, the
+backend's to choose, and may change from one version of a backend to the next. Nothing relies on
+it: not a tau, not a caller's program, and not whether the run succeeded. A trace may hold what
+the run's files and its agent's tools did, so it goes only to whoever may finish the run.
 
 ## Contracts
 
@@ -119,7 +154,8 @@ it runs anything. The adaptor, being the part of the client that takes in what t
 checks the report, as a report and against the run's files, and each output, its kind and its
 symlinks, which lead, relative and through any further symlinks, all relative, to something in
 it (see [Paths](paths.md)), before it puts anything at the caller's paths: what does not fit is a
-run that failed, which puts nothing. The client checks the report the adaptor gives it against
+run that failed, which puts nothing. It checks a status, a result's number and a trace as their
+forms, refusing what does not fit them. The client checks the report the adaptor gives it against
 the run's files too.
 
 ## Transfer
@@ -162,5 +198,7 @@ Neither the client nor the backend SDK knows how files move.
 
 - Listing the contracts a backend implements, so that a client can check a tau's APIs before it
   submits a run, and its author choose among them.
-- Asking a run's agent to improve its result, after which finishing gives the new one.
+- Asking a run's agent to improve its result, after which its status gives the new one's number,
+  and its result the new one; and asking for a result by its number.
+- A trace that streams, as the run goes on, rather than given whole.
 - A tau the backend already holds, which a call could name by a digest rather than carry.

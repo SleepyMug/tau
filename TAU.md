@@ -68,7 +68,8 @@ A **call** gives a path of the caller's for each file, and the args:
   there, and a directory merges into one there, so what the agent removed from it may stay.
 - **The caller gets** whether it succeeded, why if not, and the agent's final text, or init's.
   Success says the agent finished, not that it did well: a TAU that must say so does it in its
-  outputs or its text.
+  outputs or its text. Beside them, the run has a **trace**, what its agent did, as its runtime
+  records it, for a person looking into the run: nothing may rely on what it holds.
 - **Its effects** are its final text, its `out` and `inout` files, and its API calls, which take
   effect when made, and stay if the run fails. What the agent writes anywhere else is scratch. The
   agent learns of the caller only what the call gives it, and cannot ask the caller anything.

@@ -52,9 +52,10 @@ const { report, sources } = placed.collect({ ok, text, failure });   // send the
   gives back, its `sources`, for the backend to send: if the agent ended well, or init skipped it,
   what it left at each `out` and `inout` file's place, checked as [Paths](paths.md) asks; if that
   does not fit, or the run failed, a run that failed, giving back nothing. It may be collected
-  again as the run goes on, each time giving the latest, for a client that finishes it again (see
-  [Protocol](protocol.md#a-runs-life)).
+  again as the run goes on, each time giving the latest, for a client that asks for its result
+  again (see [Protocol](protocol.md#a-runs-life)).
 
 What the backend SDK does not do is the backend's: carry calls and results, choose where a run
 works, move its files, run init and the agent, present skills and APIs to the model, give the tau
-API, keep each run's result until it is released, and stop a run released before it ended.
+API, keep each run's status, its result, numbered, and its trace until it is released (see
+[Protocol](protocol.md#a-runs-life)), and stop a run released before it ended.

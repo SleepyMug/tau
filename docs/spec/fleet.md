@@ -8,12 +8,14 @@ runs each in a dsh session and a container of its own. It is built in: the `tau`
 ## Requests
 
 A request is a JSON object, its `op` and what the op takes, and its answer is JSON; a submit sends
-bytes after its request, and a finish's answer bytes after it:
+bytes after its request, and a result's answer bytes after it:
 
 | Request | Bytes after it | Answer | Bytes after it |
 |---|---|---|---|
 | `{op: "submit", title, project?}` | the call, as a tar archive (see [Serialization](serialization.md)), which carries the tau | `{id}`, the run's | none |
-| `{op: "finish", id}` | none | `null` | the run's latest result, as a tar archive |
+| `{op: "status", id}` | none | the run's status (see [Protocol](protocol.md#what-is-modelled)) | none |
+| `{op: "result", id}` | none | `{result}`, the result's number | the run's latest result, as a tar archive |
+| `{op: "trace", id}` | none | the run's trace, `{format, events}` | none |
 | `{op: "release", id}` | none | `null` | none |
 | `{op: "contract", name, range?}` | none | `{name, version, description}` | the contract, as a tar archive (see [Serialization](serialization.md#contracts)) |
 
@@ -21,17 +23,20 @@ bytes after its request, and a finish's answer bytes after it:
   the run, the name of its tau's directory; `project`, absolute, is the folder whose dsh workspace
   its session is in, by default the caller's working directory, or the service's to choose without
   it. The service may refuse the call, as the backend may (see [Protocol](protocol.md#a-runs-life)).
-- **Finish** waits for the run to have a result, and sends it, the latest each time it is asked. A
-  client that goes away stops the waiting.
+- **Status** gives where the run is, at once.
+- **Result** sends the run's latest result, at once, each time it is asked, and refuses a run that
+  has none yet.
+- **Trace** gives what the run's agent did so far, its format the service's: for fleet, the events
+  of the run's dsh session, as dsh logs them.
 - **Release** drops the run, stopping it if it has not ended.
 - **Contract** gives the contract `name` at the newest version the service implements, within
   `range`, a range as [APIs](apis.md) has it, when one is given, as the adaptor's `contract` asks
   (see [Protocol](protocol.md#contracts)); the service packs it with `packContract`, and the
   adaptor unpacks it with `unpackContract`.
 
-The adaptor checks a result as [Protocol](protocol.md#trust) asks of every adaptor, with
-`unpackResult`, before it puts anything at the caller's paths: what does not fit is a run that
-failed. A failed request is an error, its message the service's. The service may serve requests of
+The adaptor checks a status, a result's number and a trace as forms, and a result as
+[Protocol](protocol.md#trust) asks of every adaptor, with `unpackResult`, before it puts anything
+at the caller's paths: what does not fit is a run that failed. A failed request is an error, its message the service's. The service may serve requests of
 its own, with other ops, such as listing its runs; `readFleetRunRequest` tells a run's from those,
 and `readFleetContractRequest` a contract's, checking each as from a client the service does not
 trust.

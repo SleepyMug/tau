@@ -8,7 +8,7 @@ import { createClient } from "../client/client.js";
 import { packResult } from "../wire-tar/archive.js";
 import { packContract } from "../wire-tar/contract.js";
 import { createFleetAdaptor, type FleetHandler, type FleetTransport, fleetLoopback, readFleetContractRequest, readFleetRunRequest } from "./fleet.js";
-import { FakeFleet } from "./fleet-fake.test.util.js";
+import { FAKE_TRACE, FakeFleet } from "./fleet-fake.test.util.js";
 import { defaultFleetSocket, FleetUnreachable, fleetSocket, listenFleet } from "./fleet-socket.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-fleet-"));
@@ -72,6 +72,14 @@ for (const [name, transport] of [
 		assert.deepEqual(fleet.submitted, [{ op: "submit", title: "greet", project: caller }]);
 		assert.deepEqual(await client.finish(run), { ok: true, text: "Wrote 1." });
 		assert.equal(readFileSync(path.join(caller, "card.txt"), "utf8"), "Hello, warmly. (1)\n");
+		assert.deepEqual(await client.status(run), { state: "ended", result: 1, ok: true });
+		assert.deepEqual(await client.trace(run), {
+			format: FAKE_TRACE,
+			events: [
+				{ type: "placed", files: ["style", "card"] },
+				{ type: "ended", ok: true, text: "Wrote 1." },
+			],
+		});
 		await client.release(run);
 		assert.deepEqual(fleet.released, [run.slice("fleet:".length)]);
 		await assert.rejects(client.finish(run), /^Error: no run fleet:/u);
@@ -110,7 +118,8 @@ test("what the service gives back that does not fit the run fails it, and puts n
 		if (request.op === "submit") return { value: { id: "session-1" } };
 		const stray = path.join(tmp, "stray.txt");
 		writeFileSync(stray, "stray\n");
-		if (request.op === "finish") return { value: null, body: Readable.from(packResult({ ok: true, text: "", outputs: { style: { kind: "file" } } }, { style: stray })) };
+		if (request.op === "status") return { value: { state: "ended", result: 1, ok: true } };
+		if (request.op === "result") return { value: { result: 1 }, body: Readable.from(packResult({ ok: true, text: "", outputs: { style: { kind: "file" } } }, { style: stray })) };
 		return { value: null };
 	};
 	const client = createClient({ adaptors: { fleet: createFleetAdaptor({ transport: fleetSocket(await serving(lying)) }) } });
@@ -119,14 +128,55 @@ test("what the service gives back that does not fit the run fails it, and puts n
 	assert.match(outcome.failure ?? "", /style/u);
 	assert.equal(readFileSync(path.join(caller, "style.md"), "utf8"), "warmly\n");
 
-	const silent: FleetTransport = { exchange: async (request) => ({ value: request.op === "submit" ? { id: "session-1" } : null }) };
+	const answers: Record<string, unknown> = { submit: { id: "session-1" }, status: { state: "ended", result: 1, ok: true }, result: { result: 1 } };
+	const silent: FleetTransport = { exchange: async (request) => ({ value: answers[request.op] ?? null }) };
 	const unanswered = await createClient({ adaptors: { fleet: createFleetAdaptor({ transport: silent }) } }).run(TAU, CALL, { cwd: caller });
-	assert.deepEqual(unanswered, { ok: false, text: "", failure: "the fleet service broke the protocol: finish sent no result" });
+	assert.deepEqual(unanswered, { ok: false, text: "", failure: "the fleet service broke the protocol: result sent no result" });
 	const nameless: FleetTransport = { exchange: async () => ({ value: { id: 7 } }) };
 	await assert.rejects(createClient({ adaptors: { fleet: createFleetAdaptor({ transport: nameless }) } }).start(TAU, CALL, { cwd: caller }), /submit answered \{"id":7\}, not \{ id \}/u);
 });
 
-test("aborting a finish stops the waiting, on the socket as in the service, and not the run", async () => {
+test("a run's status, result and trace are checked as from a service the adaptor does not trust", async () => {
+	const caller = home("home-checked");
+	const answering = (answers: Record<string, unknown>): FleetTransport => ({ exchange: async (request) => ({ value: answers[request.op] ?? null }) });
+	const started = async (answers: Record<string, unknown>) => {
+		const client = createClient({ adaptors: { fleet: createFleetAdaptor({ transport: answering({ submit: { id: "session-1" }, ...answers }) }) } });
+		return { client, run: await client.start(TAU, CALL, { cwd: caller }) };
+	};
+	for (const [status, problem] of [
+		[{ state: "done" }, '`state` is "running" or "ended"'],
+		[{ state: "running", ok: true }, "a running run has no `result`, `ok` or `failure`"],
+		[{ state: "ended", result: 0, ok: true }, "`result` is a whole number, from 1"],
+		[{ state: "ended", result: 1, ok: true, failure: "no" }, "`failure` is a string, only when the result failed"],
+		[{ state: "ended", result: 1, ok: true, since: "now" }, `it: unknown key "since"`],
+	] as const) {
+		const { client, run } = await started({ status });
+		await assert.rejects(client.status(run), (error: Error) => error.message.startsWith(`the fleet service broke the protocol: status answered ${JSON.stringify(status)}: `) && error.message.includes(problem));
+	}
+	const { client, run } = await started({ result: { result: "1" }, trace: { format: "", events: [] } });
+	await assert.rejects(client.result(run), /result answered \{"result":"1"\}, not \{ result \}, its number/u);
+	await assert.rejects(client.trace(run), /trace answered what is no trace: `format` is a string, not empty/u);
+	const { client: other, run: again } = await started({ trace: { format: "x", events: {} } });
+	await assert.rejects(other.trace(again), /`events` is an array/u);
+});
+
+test("a run is running until it ended, with no result, and its trace is what its agent did so far", async () => {
+	const caller = home("home-running");
+	const fleet = writer();
+	let open = (): void => {};
+	fleet.gate = new Promise((resolve) => (open = resolve));
+	const client = createClient({ adaptors: { fleet: createFleetAdaptor({ transport: fleetSocket(await serving(fleet.handle)) }) } });
+	const run = await client.start(TAU, CALL, { cwd: caller });
+	assert.deepEqual(await client.status(run), { state: "running" });
+	await assert.rejects(client.result(run), /has no result yet/u);
+	assert.deepEqual(await client.trace(run), { format: FAKE_TRACE, events: [{ type: "placed", files: ["style", "card"] }] });
+	open();
+	assert.deepEqual(await client.finish(run), { ok: true, text: "Wrote 1." });
+	assert.deepEqual(await client.result(run), { result: 1, ok: true, text: "Wrote 1." });
+	await client.release(run);
+});
+
+test("aborting a finish stops the waiting, and not the run", async () => {
 	const caller = home("home-abort");
 	const fleet = writer();
 	let open = (): void => {};
@@ -138,8 +188,7 @@ test("aborting a finish stops the waiting, on the socket as in the service, and 
 	await new Promise((resolve) => setTimeout(resolve, 50));
 	waiting.abort(new Error("enough"));
 	await assert.rejects(finishing, /^Error: enough$/u);
-	await new Promise((resolve) => setTimeout(resolve, 50));
-	assert.equal(fleet.signals.get("finish")?.aborted, true);
+	assert.deepEqual(fleet.released, []);
 	open();
 	assert.deepEqual(await client.wait(run), { ok: true, text: "Wrote 1." });
 });
@@ -162,16 +211,16 @@ test("the socket carries the service's own ops, and refuses a request of another
 		let sent = "";
 		for await (const chunk of body) sent += Buffer.from(chunk).toString("utf8");
 		if (request.op === "list") return { value: [{ sent }] };
-		if (request.op === "history") return { value: { events: 2 }, body: Readable.from([Buffer.from("a\n"), Buffer.from("b\n")]) };
+		if (request.op === "export") return { value: { lines: 2 }, body: Readable.from([Buffer.from("a\n"), Buffer.from("b\n")]) };
 		throw new Error(`no op ${request.op}`);
 	});
 	const transport = fleetSocket(socket);
 	assert.deepEqual(await transport.exchange({ op: "list" }), { value: [{ sent: "" }] });
 	assert.deepEqual((await transport.exchange({ op: "list" }, Readable.from([Buffer.from("up")]))).value, [{ sent: "up" }]);
-	const history = await transport.exchange({ op: "history", id: "session-1" });
+	const exported = await transport.exchange({ op: "export", id: "session-1" });
 	let read = "";
-	for await (const chunk of history.body ?? []) read += Buffer.from(chunk).toString("utf8");
-	assert.deepEqual([history.value, read], [{ events: 2 }, "a\nb\n"]);
+	for await (const chunk of exported.body ?? []) read += Buffer.from(chunk).toString("utf8");
+	assert.deepEqual([exported.value, read], [{ lines: 2 }, "a\nb\n"]);
 	await assert.rejects(transport.exchange({ op: "frobnicate" }), /^Error: no op frobnicate$/u);
 
 	const raw = async (line: string): Promise<string> => {
@@ -192,12 +241,14 @@ test("the socket carries the service's own ops, and refuses a request of another
 
 test("a run's requests are checked as the service takes them, and others are left to it", () => {
 	assert.deepEqual(readFleetRunRequest({ op: "submit", title: "greet" }), { op: "submit", title: "greet" });
-	assert.deepEqual(readFleetRunRequest({ op: "release", id: "session-1" }), { op: "release", id: "session-1" });
+	for (const op of ["status", "result", "trace", "release"]) assert.deepEqual(readFleetRunRequest({ op, id: "session-1" }), { op, id: "session-1" });
+	assert.equal(readFleetRunRequest({ op: "finish", id: "session-1" }), undefined);
 	assert.equal(readFleetRunRequest({ op: "list" }), undefined);
 	assert.throws(() => readFleetRunRequest({ op: "submit", title: " " }), /^TypeError: submit takes a title, a string$/u);
 	assert.throws(() => readFleetRunRequest({ op: "submit", title: "greet", project: "here" }), /takes project, an absolute path/u);
 	assert.throws(() => readFleetRunRequest({ op: "submit", title: "greet", targets: {} }), /^TypeError: submit takes no targets$/u);
-	assert.throws(() => readFleetRunRequest({ op: "finish" }), /^TypeError: finish takes the run's id, a string$/u);
+	assert.throws(() => readFleetRunRequest({ op: "result" }), /^TypeError: result takes the run's id, a string$/u);
+	assert.throws(() => readFleetRunRequest({ op: "trace", id: "session-1", since: 3 }), /^TypeError: trace takes no since$/u);
 });
 
 /** A contract's package, with more than its declarations. */

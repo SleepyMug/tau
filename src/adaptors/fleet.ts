@@ -1,7 +1,8 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import type { WireAdaptor } from "../client/adaptor.js";
-import { isObject } from "../core/util.js";
+import { readStatus, readTrace } from "../core/forms.js";
+import { isObject, messageOf } from "../core/util.js";
 import { PACKAGE_NAME, rangeVersion } from "../core/apis.js";
 import { packCall, unpackResult } from "../wire-tar/archive.js";
 import { unpackContract } from "../wire-tar/contract.js";
@@ -10,8 +11,8 @@ import { unpackContract } from "../wire-tar/contract.js";
  * The fleet wire adaptor (docs/spec/fleet.md): a run on the fleet service, the backend of
  * deepseek-fleet, which runs each in a dsh session and a container of its own. A request is JSON,
  * with bytes after it for a submit, its call as a tar archive (docs/spec/serialization.md), and an
- * answer is JSON, with bytes after it for a finish, its result as a tar archive, which the adaptor
- * checks and puts at the caller's paths. A transport carries each request and its answer: the
+ * answer is JSON, with bytes after it for a result, as a tar archive, which the adaptor checks and
+ * puts at the caller's paths. A transport carries each request and its answer: the
  * service's socket (./fleet-socket.ts), or whatever the caller has in its place, such as a relay
  * from a container, or the service itself, in its own process.
  */
@@ -20,7 +21,7 @@ import { unpackContract } from "../wire-tar/contract.js";
 export const FLEET_PROTOCOL = 1;
 
 /**
- * A request of the fleet service: its `op`, and what the op takes. A run's three are tau's
+ * A request of the fleet service: its `op`, and what the op takes. A run's are tau's
  * ({@link FleetRunRequest}), and so is `contract` ({@link FleetContractRequest}); the service may
  * serve others of its own, which a transport carries just the same.
  */
@@ -33,8 +34,12 @@ export interface FleetRequest {
 export type FleetRunRequest =
 	/** Start a run of the call that follows, which carries its tau. Answers `{ id }`. */
 	| { readonly op: "submit"; readonly title: string; readonly project?: string }
-	/** Wait for the run's latest result, and send it after the answer, `null`. */
-	| { readonly op: "finish"; readonly id: string }
+	/** Where the run is, at once. Answers its status. */
+	| { readonly op: "status"; readonly id: string }
+	/** Send the run's latest result after the answer, `{ result }`, its number; refused while it has none. */
+	| { readonly op: "result"; readonly id: string }
+	/** What the run's agent did so far. Answers `{ format, events }`. */
+	| { readonly op: "trace"; readonly id: string }
 	/** Drop the run, stopping it if it has not ended. Answers `null`. */
 	| { readonly op: "release"; readonly id: string };
 
@@ -90,11 +95,32 @@ export function createFleetAdaptor({ transport, project }: FleetOptions): WireAd
 			if (typeof id !== "string" || id === "") throw new Error(`the fleet service broke the protocol: submit answered ${JSON.stringify(value)}, not { id }`);
 			return id;
 		},
-		async finish(id, delivery, signal) {
-			const request: FleetRunRequest = { op: "finish", id };
-			const { body } = await transport.exchange(request, undefined, signal);
-			if (body === undefined) return { ok: false, text: "", failure: "the fleet service broke the protocol: finish sent no result", outputs: {} };
-			return unpackResult(body, delivery);
+		async status(id, signal) {
+			const request: FleetRunRequest = { op: "status", id };
+			const { value } = await transport.exchange(request, undefined, signal);
+			try {
+				return readStatus(value);
+			} catch (error) {
+				throw broke(`status answered ${JSON.stringify(value)}: ${messageOf(error)}`);
+			}
+		},
+		async result(id, delivery, signal) {
+			const request: FleetRunRequest = { op: "result", id };
+			const { value, body } = await transport.exchange(request, undefined, signal);
+			const result = isObject(value) ? value.result : undefined;
+			if (!Number.isSafeInteger(result) || (result as number) < 1 || Object.keys(value as object).length !== 1)
+				throw broke(`result answered ${JSON.stringify(value)}, not { result }, its number`);
+			if (body === undefined) return { result: result as number, report: { ok: false, text: "", failure: "the fleet service broke the protocol: result sent no result", outputs: {} } };
+			return { result: result as number, report: await unpackResult(body, delivery) };
+		},
+		async trace(id, signal) {
+			const request: FleetRunRequest = { op: "trace", id };
+			const { value } = await transport.exchange(request, undefined, signal);
+			try {
+				return readTrace(value);
+			} catch (error) {
+				throw broke(`trace answered what is no trace: ${messageOf(error)}`);
+			}
 		},
 		async release(id) {
 			const request: FleetRunRequest = { op: "release", id };
@@ -103,7 +129,6 @@ export function createFleetAdaptor({ transport, project }: FleetOptions): WireAd
 		async contract(name, range, dir, signal) {
 			const request: FleetContractRequest = { op: "contract", name, ...(range === undefined ? {} : { range }) };
 			const { value, body } = await transport.exchange(request, undefined, signal);
-			const broke = (problem: string): Error => new Error(`the fleet service broke the protocol: ${problem}`);
 			const said = isObject(value) ? value : {};
 			if (typeof said.name !== "string" || typeof said.version !== "string" || typeof said.description !== "string")
 				throw broke(`contract answered ${JSON.stringify(value)}, not { name, version, description }`);
@@ -116,6 +141,10 @@ export function createFleetAdaptor({ transport, project }: FleetOptions): WireAd
 			return contract;
 		},
 	};
+}
+
+function broke(problem: string): Error {
+	return new Error(`the fleet service broke the protocol: ${problem}`);
 }
 
 /**
@@ -153,7 +182,9 @@ export function readFleetRunRequest(request: FleetRequest): FleetRunRequest | un
 			if (project !== undefined && (typeof project !== "string" || !path.isAbsolute(project))) return refuse("takes project, an absolute path, if anything");
 			return project === undefined ? { op, title } : { op, title, project };
 		}
-		case "finish":
+		case "status":
+		case "result":
+		case "trace":
 		case "release": {
 			only("id");
 			const { id } = fields;

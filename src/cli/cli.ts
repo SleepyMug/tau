@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -7,8 +7,9 @@ import { createFleetAdaptor } from "../adaptors/fleet.js";
 import { defaultFleetSocket, fleetSocket } from "../adaptors/fleet-socket.js";
 import type { WireAdaptor } from "../client/adaptor.js";
 import { createClient } from "../client/client.js";
+import { traceLines } from "../client/trace.js";
 import { fileRunStore, type RunStore } from "../client/store.js";
-import type { Outcome } from "../core/model.js";
+import type { Outcome, Status, Trace } from "../core/model.js";
 import { loadTau } from "../core/tau.js";
 import { messageOf } from "../core/util.js";
 import { addApi, removeApi, syncApis } from "./api.js";
@@ -19,14 +20,20 @@ import { type CliConfig, configFile, loadConfig } from "./config.js";
 const USAGE = [
 	"usage: tau check <dir> [call]             check a tau, and a call of it, without running it",
 	"       tau describe <dir>                 what a tau takes, as JSON",
-	"       tau run <dir> [call] [--adaptor <name>] [--json]",
+	"       tau run <dir> [call] [--adaptor <name>] [--json] [--trace <file>]",
 	"                                          run a tau, wait for it, and print its final text",
 	"       tau start <dir> [call] [--adaptor <name>]",
 	"                                          start a run, and print its id",
+	"       tau status <run> [--json]          whether a run is running or ended, and how its latest result ended",
+	"       tau result <run> [--json]          put the outputs of a run's latest result, and print its final",
+	"                                          text, at once; the run is kept",
+	"       tau trace <run>                    print what a run's agent did so far: a line of JSON naming its",
+	"                                          format, then each event, a line each",
 	"       tau finish <run> [--json]          wait for a run's result, put its outputs, and print its",
 	"                                          final text; the run is kept, and may finish again",
 	"       tau release <run>                  drop a run, stopping it if it has not ended",
-	"       tau wait <run> [--json]            finish a run, then release it",
+	"       tau wait <run> [--json] [--trace <file>]",
+	"                                          finish a run, then release it",
 	"       tau api add <name>[@<range>] [--from <source>] [dir]",
 	"                                          pull an API's contract into the tau's .tau/, and name it",
 	"                                          in its apis: from npm, the default, an adaptor, or a path",
@@ -35,7 +42,9 @@ const USAGE = [
 	"",
 	"A call is JSON, {\"files\": {...}, \"args\": {...}}: --call <file>, - for stdin, or --call-json '<json>'.",
 	"Its paths are relative to the working directory. Without one, the call is {}.",
-	"--json prints how the run ended, {ok, text, failure}, as JSON.",
+	"--json prints how the run ended, {ok, text, failure}, as JSON, with result's number for result, and the",
+	"status itself for status.",
+	"--trace writes the run's trace to the file, as tau trace prints it, once it finished, before it is released.",
 	"",
 	"A run goes through --adaptor, or $TAU_ADAPTOR, or the config's adaptor, or dummy: dummy, a dry run in",
 	"this process, or fleet, the fleet service, at $TAU_FLEET_SOCKET, or the config's, or fleet/tau.sock in",
@@ -104,8 +113,8 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 		context.stderr(`tau: --from is tau api add's\n${USAGE}\n`);
 		return 2;
 	}
-	const arity: Readonly<Record<string, number>> = { check: 1, describe: 1, run: 1, start: 1, finish: 1, release: 1, wait: 1 };
-	if (command === undefined || arity[command] === undefined || target === undefined || rest.length > 0) {
+	const arity: Readonly<Record<string, number>> = { check: 1, describe: 1, run: 1, start: 1, status: 1, result: 1, trace: 1, finish: 1, release: 1, wait: 1 };
+	if (command === undefined || arity[command] === undefined || target === undefined || rest.length > 0 || (values.trace !== undefined && command !== "run" && command !== "wait")) {
 		context.stderr(`${USAGE}\n`);
 		return 2;
 	}
@@ -128,6 +137,16 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 			}
 			return outcome.ok ? 0 : 1;
 		};
+		const tracing =
+			values.trace === undefined
+				? {}
+				: {
+						trace: async (trace: Trace) => {
+							const file = path.resolve(context.cwd, values.trace as string);
+							await mkdir(path.dirname(file), { recursive: true });
+							await writeFile(file, traceLines(trace));
+						},
+					};
 		switch (command) {
 			case "check": {
 				const given = values.call !== undefined || values["call-json"] !== undefined;
@@ -140,14 +159,30 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 				context.stdout(`${JSON.stringify(describe(dir), undefined, 2)}\n`);
 				return 0;
 			case "run":
-				return ended(await client.run(dir, await call(), { cwd: context.cwd, ...signal }));
+				return ended(await client.run(dir, await call(), { cwd: context.cwd, ...signal, ...tracing }));
 			case "start":
 				context.stdout(`${await client.start(dir, await call(), { cwd: context.cwd })}\n`);
+				return 0;
+			case "status": {
+				const status = await client.status(target, signal);
+				context.stdout(`${values.json === true ? JSON.stringify(status) : said(status)}\n`);
+				return 0;
+			}
+			case "result": {
+				const { result, ...outcome } = await client.result(target, signal);
+				if (values.json === true) {
+					context.stdout(`${JSON.stringify({ result, ...outcome })}\n`);
+					return outcome.ok ? 0 : 1;
+				}
+				return ended(outcome);
+			}
+			case "trace":
+				context.stdout(traceLines(await client.trace(target, signal)));
 				return 0;
 			case "finish":
 				return ended(await client.finish(target, signal));
 			case "wait":
-				return ended(await client.wait(target, signal));
+				return ended(await client.wait(target, { ...signal, ...tracing }));
 			default:
 				await client.release(target);
 				return 0;
@@ -169,9 +204,17 @@ function parse(argv: readonly string[]) {
 			adaptor: { type: "string" },
 			from: { type: "string" },
 			json: { type: "boolean" },
+			trace: { type: "string" },
 			help: { type: "boolean", short: "h" },
 		},
 	});
+}
+
+/** A status as `tau status` prints it. */
+function said(status: Status): string {
+	if (status.state === "running") return "running";
+	const how = status.ok ? "succeeded" : `failed: ${status.failure ?? "for no reason given"}`;
+	return `ended: result ${status.result} ${how}`;
 }
 
 async function readCall(values: ReturnType<typeof parse>["values"], context: CliContext): Promise<unknown> {

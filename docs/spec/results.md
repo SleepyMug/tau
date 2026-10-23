@@ -12,6 +12,8 @@ succeeds.
 
 Either way, the caller gets whether the run succeeded, why if it failed, and the agent's final
 text. Nothing else comes out of a run: a runtime builds no structure from what the agent does.
+Its trace, what its agent did, is no result: it is for a person looking into the run, in a form the
+backend chooses, which nothing relies on (see [Protocol](protocol.md#traces)).
 
 Anything else the agent writes, in its working directory or elsewhere, is scratch: nothing after
 the run may rely on it, and a runtime may keep it or throw it away. Whether the agent did what it

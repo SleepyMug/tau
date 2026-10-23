@@ -14,9 +14,12 @@ export {
 	type Json,
 	type Kind,
 	type Mode,
+	type Numbered,
 	type Outcome,
 	type Report,
 	type ResolvedCall,
+	type Status,
 	type Tau,
+	type Trace,
 	loadTau,
 } from "./core/index.js";

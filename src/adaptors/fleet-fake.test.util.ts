@@ -13,17 +13,27 @@ import { type FleetHandler, type FleetRequest, readFleetContractRequest, readFle
 
 /**
  * A fleet service for the tests, in this process, built on the backend SDK: each run's agent
- * runs as it is submitted, and its result is collected again at each finish, so that what the agent
- * did since shows.
+ * runs as it is submitted, and has ended once the agent has and the gate is open; its result is
+ * collected again each time it is asked for, so that what the agent did since shows. Its traces
+ * are its own, {@link FAKE_TRACE}.
  */
+export const FAKE_TRACE = "fake-fleet";
+
+interface Kept {
+	placed: Placed;
+	work: string;
+	/** How the agent ended, once it did, and the gate was open. */
+	outcome?: Outcome;
+}
+
 export class FakeFleet {
 	/** Each submit's request, as it came. */
 	readonly submitted: FleetRequest[] = [];
 	readonly released: string[] = [];
 	/** The signal of each request, by its op, the last one's. */
 	readonly signals = new Map<string, AbortSignal>();
-	private readonly runs = new Map<string, { placed: Placed; work: string; ended: Promise<Outcome> }>();
-	/** What a finish waits for before it collects. */
+	private readonly runs = new Map<string, Kept>();
+	/** What a run's end waits for, besides its agent, as a run submitted takes it. */
 	gate: Promise<void> = Promise.resolve();
 
 	/** @param implementations - the APIs it serves, and gives the contracts of. */
@@ -65,14 +75,29 @@ export class FakeFleet {
 				}
 				const placed = (admitted as Admitted).place(places);
 				const id = `session-${randomUUID()}`;
-				this.runs.set(id, { placed, work, ended: this.agent(placed) });
+				const kept: Kept = { placed, work };
+				this.runs.set(id, kept);
+				void Promise.all([this.agent(placed), this.gate]).then(([outcome]) => {
+					kept.outcome = outcome;
+				});
 				return { value: { id } };
 			}
-			case "finish": {
-				const kept = this.runOf(run.id);
-				await Promise.race([this.gate, new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))]);
-				const { report, sources } = kept.placed.collect(await kept.ended);
-				return { value: null, body: Readable.from(packResult(report, sources)) };
+			case "status": {
+				const { outcome } = this.runOf(run.id);
+				if (outcome === undefined) return { value: { state: "running" } };
+				const { ok, failure } = outcome;
+				return { value: { state: "ended", result: 1, ok, ...(failure === undefined ? {} : { failure }) } };
+			}
+			case "result": {
+				const { placed, outcome } = this.runOf(run.id);
+				if (outcome === undefined) throw new Error(`${run.id} has no result yet`);
+				const { report, sources } = placed.collect(outcome);
+				return { value: { result: 1 }, body: Readable.from(packResult(report, sources)) };
+			}
+			case "trace": {
+				const { placed, outcome } = this.runOf(run.id);
+				const events = [{ type: "placed", files: Object.keys(placed.places) }, ...(outcome === undefined ? [] : [{ type: "ended", ...outcome }])];
+				return { value: { format: FAKE_TRACE, events } };
 			}
 			case "release": {
 				const kept = this.runOf(run.id);
@@ -89,7 +114,7 @@ export class FakeFleet {
 		return this.runOf(id).placed.places;
 	}
 
-	private runOf(id: string): { placed: Placed; work: string; ended: Promise<Outcome> } {
+	private runOf(id: string): Kept {
 		const kept = this.runs.get(id);
 		if (kept === undefined) throw new Error(`no run ${id}`);
 		return kept;

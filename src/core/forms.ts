@@ -1,4 +1,4 @@
-import { type CallFile, type Envelope, type Json, KINDS, type Kind, MODES, NAME, type Report } from "./model.js";
+import { type CallFile, type Envelope, type Json, KINDS, type Kind, MODES, NAME, type Report, type Status, type Trace } from "./model.js";
 import { isObject, refuseKeys } from "./util.js";
 
 /**
@@ -46,6 +46,37 @@ export function readReport(json: unknown): Report {
 		checkKind(kind, at);
 	}
 	return json as unknown as Report;
+}
+
+/**
+ * `json` as a run's status: `state`, `running`, with nothing else, or `ended`, with `result`, the
+ * latest result's number, a whole number from 1, `ok`, and `failure`, only when that result
+ * failed. Throws TypeError for the first problem.
+ */
+export function readStatus(json: unknown): Status {
+	const { state, result, ok, failure, ...rest } = record(json, "it");
+	refuseKeys(rest, "it");
+	if (state === "running") {
+		if (result !== undefined || ok !== undefined || failure !== undefined) throw new TypeError("a running run has no `result`, `ok` or `failure`");
+		return { state };
+	}
+	if (state !== "ended") throw new TypeError('`state` is "running" or "ended"');
+	if (!Number.isSafeInteger(result) || (result as number) < 1) throw new TypeError("`result` is a whole number, from 1");
+	if (typeof ok !== "boolean") throw new TypeError("`ok` is true or false");
+	if (failure !== undefined && (ok || typeof failure !== "string")) throw new TypeError("`failure` is a string, only when the result failed");
+	return json as Status;
+}
+
+/**
+ * `json` as a run's trace: `format`, a string, not empty, and `events`, an array of anything.
+ * Throws TypeError for the first problem.
+ */
+export function readTrace(json: unknown): Trace {
+	const { format, events, ...rest } = record(json, "it");
+	refuseKeys(rest, "it");
+	if (typeof format !== "string" || format.trim() === "") throw new TypeError("`format` is a string, not empty");
+	if (!Array.isArray(events)) throw new TypeError("`events` is an array");
+	return json as unknown as Trace;
 }
 
 /**

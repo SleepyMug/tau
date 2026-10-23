@@ -89,6 +89,28 @@ test("tau start gives a run's id, which later commands finish, as often as asked
 	assert.deepEqual(await tau(["release", again]), { code: 1, stdout: "", stderr: `tau: no run ${again}\n` });
 });
 
+test("tau status, result and trace look into a run without waiting for it; --trace writes its trace as run and wait finish it", async () => {
+	const run = (await tau(["start", "greet", "--call", "call.json"])).stdout.trim();
+	assert.deepEqual(await tau(["status", run]), { code: 0, stdout: "ended: result 1 succeeded\n", stderr: "" });
+	assert.deepEqual(JSON.parse((await tau(["status", run, "--json"])).stdout), { state: "ended", result: 1, ok: true });
+	const result = await tau(["result", run, "--json"]);
+	assert.equal(result.code, 0);
+	assert.deepEqual({ ...JSON.parse(result.stdout), text: "" }, { result: 1, ok: true, text: "" });
+	const traced = await tau(["trace", run]);
+	assert.equal(traced.code, 0);
+	const lines = traced.stdout.trimEnd().split("\n").map((line) => JSON.parse(line) as { type?: string });
+	assert.deepEqual(lines[0], { format: "tau-dummy" });
+	assert.deepEqual(
+		lines.slice(1).map((event) => event.type),
+		["admitted", "rendered", "ended"],
+	);
+	assert.equal((await tau(["wait", run, "--trace", "traces/wait.jsonl"])).code, 0);
+	assert.equal(readFileSync(path.join(home, "traces", "wait.jsonl"), "utf8"), traced.stdout);
+	assert.deepEqual(await tau(["status", run]), { code: 1, stdout: "", stderr: `tau: no run ${run}\n` });
+	assert.equal((await tau(["run", "greet", "--call", "call.json", "--trace", "traces/run.jsonl"])).code, 0);
+	assert.match(readFileSync(path.join(home, "traces", "run.jsonl"), "utf8"), /^\{"format":"tau-dummy"\}\n\{"type":"admitted",/u);
+});
+
 test("a wire adaptor is chosen by name, among those the command is given", async () => {
 	const unknown = await tau(["run", "greet", "--call", "call.json", "--adaptor", "elsewhere"]);
 	assert.equal(unknown.code, 1);
@@ -201,7 +223,7 @@ test("a config file is found in $XDG_CONFIG_HOME, and an empty one says nothing"
 });
 
 test("a command line that is not one gives the usage", async () => {
-	for (const argv of [[], ["run"], ["frobnicate", "x"], ["run", "a", "b"], ["run", "greet", "--nope"]]) {
+	for (const argv of [[], ["run"], ["frobnicate", "x"], ["run", "a", "b"], ["run", "greet", "--nope"], ["status", "dummy:1", "--trace", "t.jsonl"]]) {
 		const { code, stderr } = await tau(argv);
 		assert.equal(code, 2, argv.join(" "));
 		assert.match(stderr, /usage: tau check/u);

@@ -46,7 +46,7 @@ This spec is the reference:
     other taus.
 - The runtime:
   - [Protocol](protocol.md): the client, its wire adaptors, and the backend; what is modelled
-    between them, a run's life, and the modules of `@sleepymug/tau`.
+    between them, a run's life, its trace, and the modules of `@sleepymug/tau`.
   - [Client](client.md): the client SDK, its wire adaptors, and the `tau` command.
   - [Backend](backend.md): the backend SDK, for backends.
   - [The fleet adaptor](fleet.md): runs on the fleet service, and the transports that carry them.

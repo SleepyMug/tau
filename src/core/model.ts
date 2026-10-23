@@ -73,6 +73,29 @@ export interface Report extends Outcome {
 	readonly outputs: { readonly [name: string]: Output };
 }
 
+/**
+ * Where a run is (docs/spec/protocol.md#a-runs-life): `running` until it has a result; then
+ * `ended`, with its latest result's number, counting from 1, and how that result ended.
+ */
+export type Status =
+	| { readonly state: "running" }
+	| { readonly state: "ended"; readonly result: number; readonly ok: boolean; readonly failure?: string };
+
+/** A run's result, as its wire adaptor gives it: its number, as {@link Status} counts them, and its report. */
+export interface Numbered {
+	readonly result: number;
+	readonly report: Report;
+}
+
+/**
+ * What a run's agent did, for a person looking into the run: `events`, in order, in the
+ * backend's `format`, which the backend names, and nothing relies on (docs/spec/protocol.md#traces).
+ */
+export interface Trace {
+	readonly format: string;
+	readonly events: readonly Json[];
+}
+
 /** A run, as the client hands it to its wire adaptor, checked against the tau and the caller's paths. */
 export interface Job {
 	/** The call, without the caller's paths, each `in` and `inout` file with the kind of what is at its path. */
