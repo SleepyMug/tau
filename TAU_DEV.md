@@ -52,8 +52,7 @@ console.log(`The trip was booked already; wrote its itinerary, from ${bookings.l
   TypeScript Node.js runs as is, its types stripped, from a program directory its runtime gives
   it, where they import the TAU's packages by name, as its own code does. `node_modules/` holds
   them, as installed, each self-contained, with declarations of what programs import; `exposes`
-  names those the runtime presents to the model, and the commands a package declares are on the
-  agent's PATH.
+  names those the runtime presents to the model.
 - **The run context**: init and the agent's programs read `TAU_CONTEXT`, a JSON file, `{ self,
   files, args }`: the TAU's directory, the place of each file, extra files included, by its name,
   and the args, their placeholders expanded.
