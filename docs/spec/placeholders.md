@@ -49,7 +49,7 @@ or that names what lies in `self` or in a file. The args are checked with the ca
 and init are checked when the tau is read, in what `tau.json` declares: the prompt names no extra
 file, which the tau cannot know of, but an arg does; and init names no arg, since an arg in a
 command would break its quoting, and could run commands of the caller's choosing, but reads the
-args through the tau API (see [Init](init.md)). Each placeholder in init becomes one word for
+args from the run context (see [The run context](context.md)). Each placeholder in init becomes one word for
 `sh`, quoted if need be.
 
 Nothing else is expanded: what a file holds is as it is.

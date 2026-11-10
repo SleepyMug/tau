@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { createDummyAdaptor } from "../adaptors/dummy.js";
-import { createFleetAdaptor } from "../adaptors/fleet.js";
-import { defaultFleetSocket, fleetSocket } from "../adaptors/fleet-socket.js";
+import { createSocketAdaptor, type SocketTransport } from "../adaptors/socket.js";
+import { defaultSocket, socketTransport } from "../adaptors/socket-transport.js";
 import type { WireAdaptor } from "../client/adaptor.js";
 import { createClient } from "../client/client.js";
 import { traceLines } from "../client/trace.js";
@@ -12,7 +12,6 @@ import { fileRunStore, type RunStore } from "../client/store.js";
 import type { Outcome, Status, Trace } from "../core/model.js";
 import { loadTau } from "../core/tau.js";
 import { messageOf } from "../core/util.js";
-import { addApi, removeApi, syncApis } from "./api.js";
 import { type CliConfig, configFile, loadConfig } from "./config.js";
 
 /** The `tau` command (docs/spec/client.md#the-tau-command). */
@@ -34,12 +33,6 @@ const USAGE = [
 	"       tau release <run>                  drop a run, stopping it if it has not ended",
 	"       tau wait <run> [--json] [--trace <file>]",
 	"                                          finish a run, then release it",
-	"       tau api add <name>[@<range>] [--from <npm|path> | --from-provider] [dir]",
-	"                                          pull an API's contract into the tau's .tau/, and name it",
-	"                                          in its apis: from npm, the default, a path, or the provider,",
-	"                                          the backend of the adaptor a run goes through",
-	"       tau api remove <name> [dir]        take an API out of the tau, and its contract out of .tau/",
-	"       tau api sync [dir]                 pull each API's contract .tau/ lacks, from where it came",
 	"",
 	"A call is JSON, {\"files\": {...}, \"args\": {...}}: --call <file>, - for stdin, or --call-json '<json>'.",
 	"Its paths are relative to the working directory. Without one, the call is {}.",
@@ -48,13 +41,13 @@ const USAGE = [
 	"--trace writes the run's trace to the file, as tau trace prints it, once it finished, before it is released.",
 	"",
 	"A run goes through --adaptor, or $TAU_ADAPTOR, or the config's adaptor, or dummy: dummy, a dry run in",
-	"this process, or fleet, the fleet service, at $TAU_FLEET_SOCKET, or the config's, or fleet/tau.sock in",
-	"the dsh home. Interrupting run releases the run; interrupting finish or wait stops the waiting.",
+	"this process, or socket, a backend on a Unix socket, at $TAU_SOCKET, or the config's. Interrupting run",
+	"releases the run; interrupting finish or wait stops the waiting.",
 	"",
 	"The config is YAML, at $TAU_CONFIG, or tau/config.yaml in $XDG_CONFIG_HOME, or in ~/.config:",
-	"  adaptor: fleet",
+	"  adaptor: socket",
 	"  adaptors:",
-	"    fleet: { socket: ~/.dsh/fleet/tau.sock }",
+	"    socket: { path: ~/.dsh/tau/tau.sock }",
 ].join("\n");
 
 /** What the command reads and writes, and what it runs on. */
@@ -68,8 +61,6 @@ export interface CliContext {
 	readonly adaptors?: { readonly [name: string]: WireAdaptor };
 	/** Where runs are kept between commands; by default files in the state directory. */
 	readonly runs?: RunStore;
-	/** What reaches the npm registry, for `tau api`; by default the global `fetch`. */
-	readonly fetch?: typeof fetch;
 	/** Aborted when the command is interrupted: a run started by `run` is released, and `finish` and `wait` stop waiting. */
 	readonly signal?: AbortSignal;
 }
@@ -81,18 +72,22 @@ export function stateDir(env: CliContext["env"]): string {
 }
 
 /**
- * The wire adaptors built into tau, each made here, none loaded by name: `dummy`, and `fleet`, at
- * the fleet service's socket, `$TAU_FLEET_SOCKET`, or the config's, or the dsh home's, its runs'
- * sessions in the dsh workspace of `cwd`.
+ * The wire adaptors built into tau, each made here, none loaded by name: `dummy`, and `socket`, at
+ * the backend's socket, `$TAU_SOCKET`, or the config's, telling the backend the caller's folder,
+ * `cwd`.
  */
 export function defaultAdaptors(state: string, env: CliContext["env"], cwd: string, config: CliConfig = { adaptors: {} }): { readonly [name: string]: WireAdaptor } {
-	const configured = config.adaptors.fleet?.socket;
-	const socket = (env.TAU_FLEET_SOCKET ?? "").trim() === "" && configured !== undefined ? configured : defaultFleetSocket(env);
+	const socket = defaultSocket(env) ?? config.adaptors.socket?.path;
 	return {
 		dummy: createDummyAdaptor({ spool: path.join(state, "dummy") }),
-		fleet: createFleetAdaptor({ transport: fleetSocket(socket), project: path.resolve(cwd) }),
+		socket: createSocketAdaptor({ transport: socket === undefined ? nowhere : socketTransport(socket), project: path.resolve(cwd) }),
 	};
 }
+
+/** The socket adaptor's transport when nothing names its socket. */
+const nowhere: SocketTransport = {
+	exchange: () => Promise.reject(new Error("the socket adaptor has no socket: set $TAU_SOCKET, or adaptors.socket.path in the config")),
+};
 
 /** Run the command line `argv`, without the program; gives its exit code. */
 export async function main(argv: readonly string[], context: CliContext): Promise<number> {
@@ -108,11 +103,6 @@ export async function main(argv: readonly string[], context: CliContext): Promis
 	if (values.help === true) {
 		context.stdout(`${USAGE}\n`);
 		return 0;
-	}
-	if (command === "api") return api(target, rest, values, context);
-	if (values.from !== undefined || values["from-provider"] !== undefined) {
-		context.stderr(`tau: --from and --from-provider are tau api add's\n${USAGE}\n`);
-		return 2;
 	}
 	const arity: Readonly<Record<string, number>> = { check: 1, describe: 1, run: 1, start: 1, status: 1, result: 1, trace: 1, finish: 1, release: 1, wait: 1 };
 	if (command === undefined || arity[command] === undefined || target === undefined || rest.length > 0 || (values.trace !== undefined && command !== "run" && command !== "wait")) {
@@ -203,8 +193,6 @@ function parse(argv: readonly string[]) {
 			call: { type: "string" },
 			"call-json": { type: "string" },
 			adaptor: { type: "string" },
-			from: { type: "string" },
-			"from-provider": { type: "boolean" },
 			json: { type: "boolean" },
 			trace: { type: "string" },
 			help: { type: "boolean", short: "h" },
@@ -235,41 +223,6 @@ async function readCall(values: ReturnType<typeof parse>["values"], context: Cli
 	}
 }
 
-/** `tau api <command> …`, in the working directory's tau unless one is named. */
-async function api(command: string | undefined, args: readonly string[], values: ReturnType<typeof parse>["values"], context: CliContext): Promise<number> {
-	const { from, "from-provider": provider } = values;
-	const takes: Readonly<Record<string, [number, number]>> = { add: [1, 2], remove: [1, 2], sync: [0, 1] };
-	const [least, most] = takes[command ?? ""] ?? [-1, -1];
-	if (args.length < least || args.length > most || ((from !== undefined || provider !== undefined) && command !== "add")) {
-		context.stderr(`${USAGE}\n`);
-		return 2;
-	}
-	const named = command === "sync" ? args[0] : args[1];
-	const dir = path.resolve(context.cwd, named ?? ".");
-	try {
-		const config = await loadConfig(configFile(context.env));
-		const apiContext = {
-			adaptors: context.adaptors ?? defaultAdaptors(stateDir(context.env), context.env, context.cwd, config),
-			// The provider is the adaptor a run would go through.
-			provider: values.adaptor ?? context.env.TAU_ADAPTOR ?? config.adaptor ?? "dummy",
-			env: context.env,
-			...(context.fetch === undefined ? {} : { fetch: context.fetch }),
-			...(context.signal === undefined ? {} : { signal: context.signal }),
-		};
-		const said =
-			command === "add"
-				? await addApi(dir, args[0] as string, { ...(from === undefined ? {} : { from }), provider: provider === true }, context.cwd, apiContext)
-				: command === "remove"
-					? await removeApi(dir, args[0] as string)
-					: await syncApis(dir, apiContext);
-		context.stdout(`${said}\n`);
-		return 0;
-	} catch (error) {
-		context.stderr(`tau: ${messageOf(error)}\n`);
-		return 1;
-	}
-}
-
 /** What a tau takes, and what it needs, for whoever runs it. */
 function describe(dir: string): object {
 	const tau = loadTau(dir);
@@ -278,7 +231,6 @@ function describe(dir: string): object {
 		...(tau.description === undefined ? {} : { description: tau.description }),
 		files: tau.files,
 		...(tau.args === undefined ? {} : { args: tau.args }),
-		apis: Object.fromEntries(tau.apis.map(({ name, range }) => [name, range])),
 		exposes: tau.exposed.map(({ specifier }) => specifier),
 		skills: tau.skills.map(({ name }) => name),
 		...(tau.init === undefined ? {} : { init: tau.init }),

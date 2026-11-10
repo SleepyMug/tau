@@ -1,7 +1,7 @@
 # TAU (Transportable Agent Unit)
 
-A **TAU** is an agent packaged as a directory: a prompt, the files and args it takes, and the APIs
-its programs call. A **runtime** runs one for a **caller**, a person, a program or another agent:
+A **TAU** is an agent packaged as a directory: a prompt, the files and args it takes, and code of its
+own its programs build on. A **runtime** runs one for a **caller**, a person, a program or another agent:
 the TAU's **agent**, a model, does the task its prompt sets, with what the caller gives it. This
 says what a TAU takes and what a run of one promises; TAU_DEV.md says how to make one.
 
@@ -70,13 +70,15 @@ A **call** gives a path of the caller's for each file, and the args:
   Success says the agent finished, not that it did well: a TAU that must say so does it in its
   outputs or its text. Beside them, the run has a **trace**, what its agent did, as its runtime
   records it, for a person looking into the run: nothing may rely on what it holds.
-- **Its effects** are its final text, its `out` and `inout` files, and its API calls, which take
-  effect when made, and stay if the run fails. What the agent writes anywhere else is scratch. The
-  agent learns of the caller only what the call gives it, and cannot ask the caller anything.
-- **Runs nest.** An agent whose TAU has the TAU API, `@sleepymug/tau-api`, runs a TAU with `run(tau,
-  call)`, giving paths in its own view, such as its files' places, and it can make several runs at
-  once. A caller can hand an agent a call to make as an arg, its placeholders for the new run
-  escaped: `"$${trip}/ben.pdf"` reaches the agent as `"${trip}/ben.pdf"`, which the new run expands.
+- **Its effects** are its final text, its `out` and `inout` files, and what it did through what its
+  runtime gives it, such as a command that reaches a service, which takes effect when done, and
+  stays if the run fails. What the agent writes anywhere else is scratch. The agent learns of the
+  caller only what the call gives it, and cannot ask the caller anything.
+- **Runs nest.** An agent whose runtime gives it the `tau` command runs a TAU with `tau run <dir>
+  --call-json '<call>' --json`, giving paths in its own view, such as its files' places, and it can
+  make several runs at once. A caller can hand an agent a call to make as an arg, its placeholders
+  for the new run escaped: `"$${trip}/ben.pdf"` reaches the agent as `"${trip}/ben.pdf"`, which
+  the new run expands.
 
 A TAU says what its agent needs, never how: where it runs, which model and tools drive it, and what
 else it finds, such as commands or the network, are the runtime's. So are the places, and whether a

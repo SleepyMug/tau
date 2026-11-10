@@ -32,7 +32,8 @@
       "import": "./dist/adaptors/index.js"
     },
     "./TAU.md": "./TAU.md",
-    "./TAU_DEV.md": "./TAU_DEV.md"
+    "./TAU_DEV.md": "./TAU_DEV.md",
+    "./cli": "./dist/cli/main.js"
   },
   "files": [
     "dist",

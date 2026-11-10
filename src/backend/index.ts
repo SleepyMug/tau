@@ -4,15 +4,11 @@
  */
 export {
 	type Admitted,
-	type BackendOptions,
 	type BackendSdk,
 	type Collected,
-	catalogOf,
+	type Context,
 	createBackendSdk,
-	type Implementation,
-	type ImplementationCatalog,
 	initDecision,
-	type Link,
 	type Placed,
 	placesUnder,
 	type Rendered,

@@ -9,17 +9,18 @@ it, such as when a program can do the task alone, for some args.
 ```
 
 A runtime runs it once for each run, with `sh -c`, in the agent's working directory, with the
-files in place, and the APIs linked. Its placeholders, `${self}`, the tau's own directory, and a
-file's name, its place, each become one word for `sh` (see [Placeholders](placeholders.md)). It
-names no arg: it reads the args through the tau API, as it can the places of the files (see
-[The tau API](tau-api.md)). A program of the tau's, such as `${self}/init.mts`, imports what the
-agent's programs do, resolving as the tau's own code does (see [Runtimes](runtimes.md)). Like the
-agent, init reads the tau's directory but does not change it, and what it writes but at the files'
-places is scratch (see [Results](results.md)). What it does is the run's, as what the agent does
-is: what it leaves at the files' places, which the agent finds there, and its API calls, which
-stay done, the runs of other taus included.
+files in place, and what the agent's processes are given, its run context included (see
+[The run context](context.md)). Its placeholders, `${self}`, the tau's own directory, and a file's
+name, its place, each become one word for `sh` (see [Placeholders](placeholders.md)). It names no
+arg: it reads the args from the run context, as it can the places of the files. A program of the
+tau's, such as `${self}/init.mts`, imports the tau's packages, as the tau's own code does (see
+[Packages](packages.md)). Like the agent, init reads the tau's directory but does not change it,
+and what it writes but at the files' places is scratch (see [Results](results.md)). What it does
+is the run's, as what the agent does is: what it leaves at the files' places, which the agent finds
+there, and what it does through what the runtime gives it, which stays done, the runs of other
+taus included.
 
-How it exits says what comes next, each code named in the tau API:
+How it exits says what comes next, each code with a name of its own:
 - **0, `TAU_SKIP`**: the agent does not run. The run succeeds as if the agent returned normally,
   with init's stdout as its final text (see [Results](results.md)): init leaves what each `out`
   and `inout` file needs.

@@ -1,42 +1,34 @@
 import { once } from "node:events";
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Socket } from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { PassThrough, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { isObject, messageOf } from "../core/util.js";
-import { FLEET_PROTOCOL, type FleetAnswer, type FleetHandler, type FleetRequest, type FleetTransport } from "./fleet.js";
+import { type RequestHandler, SOCKET_PROTOCOL, type SocketAnswer, type SocketRequest, type SocketTransport } from "./socket.js";
 
 /**
- * The fleet service's socket (docs/spec/fleet.md#the-socket): a Unix socket on which a client sends
- * one request, a line of JSON, with bytes after it when it says so, up to the end of what the
- * client sends, and the service answers with a line of JSON, with bytes after it when it says so,
- * up to the end of the connection. Only its owner can open it, which is its authentication.
+ * A backend's socket (docs/spec/socket.md#the-socket): a Unix socket on which a client sends one
+ * request, a line of JSON, with bytes after it when it says so, up to the end of what the client
+ * sends, and the backend answers with a line of JSON, with bytes after it when it says so, up to
+ * the end of the connection. Only its owner can open it, which is its authentication.
  */
 
-/** No fleet service listens on the socket. */
-export class FleetUnreachable extends Error {}
+/** No backend listens on the socket. */
+export class SocketUnreachable extends Error {}
 
-/**
- * Where the fleet service listens: `$TAU_FLEET_SOCKET`, or `fleet/tau.sock` in the dsh home, as
- * dsh finds it: `$DSH_HOME`, a leading `~` the user's home, or else `~/.dsh`.
- */
-export function defaultFleetSocket(env: { readonly [name: string]: string | undefined } = process.env): string {
-	const given = env.TAU_FLEET_SOCKET ?? "";
-	if (given.trim() !== "") return path.resolve(given);
-	const home = env.DSH_HOME ?? "";
-	if (home.trim() === "") return path.join(os.homedir(), ".dsh", "fleet", "tau.sock");
-	const expanded = home === "~" || home.startsWith("~/") ? os.homedir() + home.slice(1) : home;
-	return path.join(path.resolve(expanded), "fleet", "tau.sock");
+/** Where the backend listens, as `$TAU_SOCKET` names it, absolute; undefined when it is unset or blank. */
+export function defaultSocket(env: { readonly [name: string]: string | undefined } = process.env): string | undefined {
+	const given = env.TAU_SOCKET ?? "";
+	return given.trim() === "" ? undefined : path.resolve(given);
 }
 
-/** A transport over the fleet service's socket at `socket`: a connection for each request. */
-export function fleetSocket(socket: string): FleetTransport {
+/** A transport over the backend's socket at `socket`: a connection for each request. */
+export function socketTransport(socket: string): SocketTransport {
 	return { exchange: (request, body, signal) => exchange(socket, request, body, signal) };
 }
 
-function exchange(socket: string, request: FleetRequest, body: AsyncIterable<Uint8Array> | undefined, signal: AbortSignal | undefined): Promise<FleetAnswer> {
+function exchange(socket: string, request: SocketRequest, body: AsyncIterable<Uint8Array> | undefined, signal: AbortSignal | undefined): Promise<SocketAnswer> {
 	return new Promise((resolve, reject) => {
 		if (signal?.aborted === true) {
 			reject(signal.reason);
@@ -68,7 +60,7 @@ function exchange(socket: string, request: FleetRequest, body: AsyncIterable<Uin
 				connection.destroy();
 				reject(error);
 			});
-		const lost = (): void => fail(new Error(`the fleet service at ${socket} went away before it answered`));
+		const lost = (): void => fail(new Error(`the backend at ${socket} went away before it answered`));
 		const read = (chunk: Buffer): void => {
 			received = Buffer.concat([received, chunk]);
 			const end = received.indexOf(0x0a);
@@ -78,15 +70,15 @@ function exchange(socket: string, request: FleetRequest, body: AsyncIterable<Uin
 			try {
 				answer = JSON.parse(line);
 			} catch {
-				fail(new Error(`the fleet service broke the protocol: it answered ${JSON.stringify(line)}, not JSON`));
+				fail(new Error(`the backend broke the protocol: it answered ${JSON.stringify(line)}, not JSON`));
 				return;
 			}
 			if (!isObject(answer) || typeof answer.ok !== "boolean") {
-				fail(new Error(`the fleet service broke the protocol: it answered ${line}`));
+				fail(new Error(`the backend broke the protocol: it answered ${line}`));
 				return;
 			}
 			if (!answer.ok) {
-				fail(new Error(typeof answer.error === "string" ? answer.error : `the fleet service failed, saying ${line}`));
+				fail(new Error(typeof answer.error === "string" ? answer.error : `the backend failed, saying ${line}`));
 				return;
 			}
 			if (answer.body !== true) {
@@ -107,7 +99,7 @@ function exchange(socket: string, request: FleetRequest, body: AsyncIterable<Uin
 				// A connection cut before its end cuts what follows the answer, which its reader then sees.
 				connection.once("close", () => {
 					done();
-					if (!ended) rest.destroy(signal?.aborted === true ? signal.reason : new Error(`the fleet service at ${socket} went away while it sent ${request.op}'s answer`));
+					if (!ended) rest.destroy(signal?.aborted === true ? signal.reason : new Error(`the backend at ${socket} went away while it sent ${request.op}'s answer`));
 				});
 				connection.pipe(rest);
 				resolve({ value: answer.value, body: rest });
@@ -115,7 +107,7 @@ function exchange(socket: string, request: FleetRequest, body: AsyncIterable<Uin
 		};
 		connection.once("connect", () => {
 			connected = true;
-			connection.write(`${JSON.stringify({ ...request, protocol: FLEET_PROTOCOL, ...(body === undefined ? {} : { body: true }) })}\n`);
+			connection.write(`${JSON.stringify({ ...request, protocol: SOCKET_PROTOCOL, ...(body === undefined ? {} : { body: true }) })}\n`);
 			if (body !== undefined) void send(connection, body);
 		});
 		connection.on("data", read);
@@ -128,7 +120,7 @@ function exchange(socket: string, request: FleetRequest, body: AsyncIterable<Uin
 			}
 			fail(
 				error.code === "ENOENT" || error.code === "ECONNREFUSED"
-					? new FleetUnreachable(`no fleet service at ${socket}: is dsh running, with fleet installed?`, { cause: error })
+					? new SocketUnreachable(`no backend at ${socket}: is it running?`, { cause: error })
 					: error,
 			);
 		});
@@ -137,7 +129,7 @@ function exchange(socket: string, request: FleetRequest, body: AsyncIterable<Uin
 	});
 }
 
-/** Send what follows a request, and end it; what cannot be read cuts the connection, which the service then refuses. */
+/** Send what follows a request, and end it; what cannot be read cuts the connection, which the backend then refuses. */
 async function send(connection: Socket, body: AsyncIterable<Uint8Array>): Promise<void> {
 	try {
 		for await (const chunk of body) {
@@ -151,14 +143,14 @@ async function send(connection: Socket, body: AsyncIterable<Uint8Array>): Promis
 }
 
 /**
- * Serve `handle` on a socket at `socket`, as the fleet service does: each connection's request,
- * of the wire's version, and what follows it, if it says so; and its answer, and what follows that.
- * A client that goes away aborts its request's signal. The socket's folder is made if missing;
- * the socket is its owner's alone.
+ * Serve `handle` on a socket at `socket`, as a backend does: each connection's request, of the
+ * wire's version, and what follows it, if it says so; and its answer, and what follows that. A
+ * client that goes away aborts its request's signal. The socket's folder is made if missing; the
+ * socket is its owner's alone.
  * @returns what closes the socket and its connections.
- * @throws when a service already answers there.
+ * @throws when a backend already answers there.
  */
-export async function listenFleet(socket: string, handle: FleetHandler): Promise<() => Promise<void>> {
+export async function listenSocket(socket: string, handle: RequestHandler): Promise<() => Promise<void>> {
 	await mkdir(path.dirname(socket), { recursive: true, mode: 0o700 });
 	await claim(socket);
 	const sockets = new Set<Socket>();
@@ -166,7 +158,7 @@ export async function listenFleet(socket: string, handle: FleetHandler): Promise
 	const server = createServer({ allowHalfOpen: true }, (connection) => {
 		sockets.add(connection);
 		connection.once("close", () => sockets.delete(connection));
-		serve(connection, handle);
+		serveConnection(connection, handle);
 	});
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
@@ -189,7 +181,7 @@ export async function listenFleet(socket: string, handle: FleetHandler): Promise
 	return close;
 }
 
-/** Take over a socket's path, unless a service answers on it. */
+/** Take over a socket's path, unless a backend answers on it. */
 async function claim(socket: string): Promise<void> {
 	const answering = await new Promise<boolean>((resolve) => {
 		const probe = createConnection(socket);
@@ -199,15 +191,20 @@ async function claim(socket: string): Promise<void> {
 		});
 		probe.once("error", () => resolve(false));
 	});
-	if (answering) throw new Error(`another fleet service serves ${socket}`);
-	// What is left of a service that did not close it.
+	if (answering) throw new Error(`another backend serves ${socket}`);
+	// What is left of a backend that did not close it.
 	await unlink(socket).catch((error: NodeJS.ErrnoException) => {
 		if (error.code !== "ENOENT") throw error;
 	});
 }
 
-/** Read one connection's request, up to its first newline, and answer it; what follows the newline is its body, if it has one. */
-function serve(connection: Socket, handle: FleetHandler): void {
+/**
+ * Serve one connection, as {@link listenSocket} serves each: read its request, up to its first
+ * newline, and answer it; what follows the newline is its body, if it has one. For a connection
+ * that reaches the backend otherwise, such as one relayed from a container, whose relay has read
+ * what it needed of it first.
+ */
+export function serveConnection(connection: Socket, handle: RequestHandler): void {
 	let received = Buffer.alloc(0);
 	let withBody = false;
 	const gone = new AbortController();
@@ -227,7 +224,7 @@ function serve(connection: Socket, handle: FleetHandler): void {
 		connection.pause();
 		connection.off("data", read);
 		const line = received.subarray(0, end).toString("utf8");
-		let request: FleetRequest | undefined;
+		let request: SocketRequest | undefined;
 		let refusal: string | undefined;
 		try {
 			({ request, body: withBody } = parse(line));
@@ -242,9 +239,11 @@ function serve(connection: Socket, handle: FleetHandler): void {
 		void respond(connection, () => (request === undefined ? Promise.reject(new Error(refusal)) : handle(request, body, gone.signal)), body);
 	};
 	connection.on("data", read);
+	// A connection its relay paused, to read what it needed of it, flows again.
+	connection.resume();
 }
 
-async function respond(connection: Socket, answer: () => Promise<FleetAnswer>, body: Readable): Promise<void> {
+async function respond(connection: Socket, answer: () => Promise<SocketAnswer>, body: Readable): Promise<void> {
 	let line: object;
 	let rest: AsyncIterable<Uint8Array> | undefined;
 	try {
@@ -265,7 +264,7 @@ async function respond(connection: Socket, answer: () => Promise<FleetAnswer>, b
 }
 
 /** A request, of the wire's version, as an object with its op, without the version; and whether a body follows it. */
-function parse(line: string): { request: FleetRequest; body: boolean } {
+function parse(line: string): { request: SocketRequest; body: boolean } {
 	let json: unknown;
 	try {
 		json = JSON.parse(line);
@@ -274,8 +273,8 @@ function parse(line: string): { request: FleetRequest; body: boolean } {
 	}
 	if (!isObject(json)) throw new Error("the request is not a JSON object");
 	const { protocol, body, ...request } = json;
-	if (protocol !== FLEET_PROTOCOL) throw new Error(`the client speaks the fleet wire ${String(protocol)}, and the service ${FLEET_PROTOCOL}`);
+	if (protocol !== SOCKET_PROTOCOL) throw new Error(`the client speaks the socket wire ${String(protocol)}, and the backend ${SOCKET_PROTOCOL}`);
 	if (body !== undefined && body !== true) throw new Error("a request's body is true, if anything");
 	if (typeof request.op !== "string" || request.op === "") throw new Error("the request has no op");
-	return { request: request as FleetRequest, body: body === true };
+	return { request: request as SocketRequest, body: body === true };
 }

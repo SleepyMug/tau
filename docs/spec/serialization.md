@@ -124,23 +124,6 @@ holds. A caller that keeps the path of each of its `out` and `inout` files puts 
 file's path, as [Results](results.md) says: a directory merging into a directory already there,
 anything else replacing what is there.
 
-## Contracts
-
-A contract, as a backend gives it to an adaptor that asks for it (see
-[Protocol](protocol.md#contracts)), may be an archive too, restricted as above but for its first
-entry: it holds no JSON, which whatever carries it sends beside it, and its one content is the
-contract's, a directory at `contract/`, holding its `package.json` and its declarations, where
-the package has them, and no symlink. `packContract(dir)` writes one from a contract's package;
-`unpackContract(bytes, dir, { name, range })` reads one into `dir`, and checks it as a contract of
-that name, at a version within `range`.
-
-```
-contract/
-contract/package.json
-contract/index.d.ts
-contract/tags.d.ts
-```
-
 ## Open
 
 - Content from elsewhere: a file's entry in `call.json` naming its content by a digest, as in

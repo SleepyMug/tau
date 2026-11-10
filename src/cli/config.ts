@@ -15,9 +15,9 @@ export interface CliConfig {
 	readonly adaptor?: string;
 	/** The options of the adaptors built into tau, by name. */
 	readonly adaptors: {
-		readonly fleet?: {
-			/** The fleet service's socket, absolute, unless `$TAU_FLEET_SOCKET` names one. */
-			readonly socket?: string;
+		readonly socket?: {
+			/** The backend's socket, absolute, unless `$TAU_SOCKET` names one. */
+			readonly path?: string;
 		};
 	};
 }
@@ -49,12 +49,12 @@ export async function loadConfig(file: string): Promise<CliConfig> {
 
 function configOf(value: unknown, dir: string): CliConfig {
 	const top = fields(value, "it", ["adaptor", "adaptors"]);
-	const adaptors = fields(top.adaptors ?? {}, "adaptors", ["fleet"]);
-	const fleet = adaptors.fleet === undefined ? undefined : fields(adaptors.fleet, "adaptors.fleet", ["socket"]);
-	const socket = fleet?.socket === undefined ? undefined : pathOf(fleet.socket, "adaptors.fleet.socket", dir);
+	const adaptors = fields(top.adaptors ?? {}, "adaptors", ["socket"]);
+	const socket = adaptors.socket === undefined ? undefined : fields(adaptors.socket, "adaptors.socket", ["path"]);
+	const at = socket?.path === undefined ? undefined : pathOf(socket.path, "adaptors.socket.path", dir);
 	return {
 		...(top.adaptor === undefined ? {} : { adaptor: text(top.adaptor, "adaptor") }),
-		adaptors: fleet === undefined ? {} : { fleet: socket === undefined ? {} : { socket } },
+		adaptors: socket === undefined ? {} : { socket: at === undefined ? {} : { path: at } },
 	};
 }
 

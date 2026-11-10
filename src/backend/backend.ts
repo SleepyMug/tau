@@ -1,7 +1,7 @@
 import path from "node:path";
-import { type Api, compareVersions, type Exposed, within } from "../core/apis.js";
 import { readEnvelope } from "../core/forms.js";
 import { type CallFile, type Envelope, type Json, type Outcome, type Output, type Report, TAU_RUN, TAU_SKIP } from "../core/model.js";
+import type { Exposed } from "../core/packages.js";
 import { checkOutputs, checkPlaced, kindAt } from "../core/paths.js";
 import { type Expanded, loadTau, type Skill, type Tau } from "../core/tau.js";
 import { messageOf } from "../core/util.js";
@@ -14,62 +14,16 @@ import { messageOf } from "../core/util.js";
  * files is the backend's, which the transfer helpers can do for it.
  */
 
-/** An implementation of a contract: a module that does what its declarations say (docs/spec/implementations.md). */
-export interface Implementation {
-	/** The contract's name, its package's. */
-	readonly contract: string;
-	/** The version of the contract it implements. */
-	readonly version: string;
-	/** What the agent's programs get when they import the contract by its name: a module's path or specifier, the backend's to give. */
-	readonly module: string;
-	/**
-	 * The directory of the contract's package.json and declarations, at `version`, where the backend
-	 * has them: what it shows the agent, and gives an adaptor that asks for the contract
-	 * (docs/spec/protocol.md#contracts); undefined when it has none.
-	 */
-	readonly declarations?: string;
-}
-
-/** Where the backend finds an implementation for each API. */
-export interface ImplementationCatalog {
-	/**
-	 * An implementation of `contract` at a version within `range`, the tau's, `^` and a version, or,
-	 * without one, at any version; undefined without one.
-	 */
-	find(contract: string, range?: string): Implementation | undefined;
-}
-
-/**
- * A catalog of `implementations`, which finds the newest of a contract within the range, or of all
- * without one, by the contract's name and version alone.
- */
-export function catalogOf(implementations: readonly Implementation[]): ImplementationCatalog {
-	return {
-		find: (contract, range) =>
-			implementations
-				.filter((it) => it.contract === contract && (range === undefined || within(it.version, range)))
-				.reduce<Implementation | undefined>((newest, it) => (newest === undefined || compareVersions(it.version, newest.version) > 0 ? it : newest), undefined),
-	};
-}
-
-/** An API of the tau, and the implementation that serves it. */
-export interface Link {
-	readonly api: Api;
-	readonly implementation: Implementation;
-}
-
 /** Each file at `<dir>/<name>/<base>`: a place for each file of `envelope`, by its name. */
 export function placesUnder(dir: string, envelope: Envelope): { [name: string]: string } {
 	return Object.fromEntries(Object.entries(envelope.files).map(([name, file]: [string, CallFile]) => [name, path.join(path.resolve(dir), name, file.base)]));
 }
 
-/** A call the backend admitted: checked against its tau, each API linked, before any file arrives. */
+/** A call the backend admitted: checked against its tau, before any file arrives. */
 export interface Admitted {
 	readonly tau: Tau;
 	/** The call, checked against the tau. */
 	readonly envelope: Envelope;
-	/** Each API of the tau, with its implementation, in the order of their names. */
-	readonly links: readonly Link[];
 	/**
 	 * The run, once the backend placed its files: each `in` and `inout` file's content at its place,
 	 * and each `out` file's place in a directory that exists, each place absolute and ending in its
@@ -103,32 +57,34 @@ export interface Collected {
 	readonly sources: { readonly [name: string]: string };
 }
 
+/** A run's context (docs/spec/context.md): where the agent sees the tau's directory and each file, and the args, expanded. */
+export interface Context {
+	readonly self: string;
+	readonly files: { readonly [name: string]: string };
+	readonly args: { readonly [name: string]: Json };
+}
+
 /** What the agent is given, for the backend to present it as it will. */
 export interface Rendered extends Expanded {
-	/** What the tau API gives the agent's programs: `files()`, where each file is, and `args()`, the args expanded. */
-	readonly context: { readonly files: { readonly [name: string]: string }; readonly args: { readonly [name: string]: Json } };
+	/** The run's context, which the backend writes where `TAU_CONTEXT` names it, for init and the agent's programs. */
+	readonly context: Context;
 	/** Where the agent sees the tau's own directory. */
 	readonly self: string;
 	readonly skills: readonly Skill[];
 	readonly exposed: readonly Exposed[];
-	readonly links: readonly Link[];
-}
-
-export interface BackendOptions {
-	readonly implementations: ImplementationCatalog;
 }
 
 export interface BackendSdk {
 	/**
 	 * Admit a call: `envelope`, as it came, its form checked, and checked against the tau at
 	 * `tauDir`, where the backend placed the tau that came with it, as from a client the backend
-	 * does not trust; and each API found an implementation. Throws when the call cannot run as
-	 * declared, before the backend need take any file.
+	 * does not trust. Throws when the call cannot run as declared, before the backend need take any
+	 * file.
 	 */
 	admit(envelope: unknown, tauDir: string): Admitted;
 }
 
-export function createBackendSdk(options: BackendOptions): BackendSdk {
+export function createBackendSdk(): BackendSdk {
 	return {
 		admit(json, tauDir) {
 			let given: Envelope;
@@ -139,42 +95,26 @@ export function createBackendSdk(options: BackendOptions): BackendSdk {
 			}
 			const tau = loadTau(tauDir);
 			const envelope = tau.check(given);
-			const links = linksOf(tau, options.implementations);
 			return {
 				tau,
 				envelope,
-				links,
 				place(places) {
 					checkPlaced(envelope, places);
-					return placed(tau, envelope, links, { ...places });
+					return placed(tau, envelope, { ...places });
 				},
 			};
 		},
 	};
 }
 
-/** Each API of `tau` with an implementation that serves it. Throws, listing each that has none. */
-function linksOf(tau: Tau, catalog: ImplementationCatalog): Link[] {
-	const links: Link[] = [];
-	const missing: string[] = [];
-	for (const api of tau.apis) {
-		const implementation = catalog.find(api.name, api.range);
-		if (implementation === undefined) missing.push(`${api.name}@${api.range}`);
-		else links.push({ api, implementation });
-	}
-	if (missing.length > 0) throw new Error(`no implementation serves:\n  ${missing.join("\n  ")}`);
-	return links;
-}
-
-function placed(tau: Tau, envelope: Envelope, links: readonly Link[], places: { readonly [name: string]: string }): Placed {
+function placed(tau: Tau, envelope: Envelope, places: { readonly [name: string]: string }): Placed {
 	return {
 		tau,
 		envelope,
-		links,
 		places,
 		render(self = tau.dir) {
 			const expanded = tau.expand(envelope, places, self);
-			return { ...expanded, context: { files: places, args: expanded.args }, self, skills: tau.skills, exposed: tau.exposed, links };
+			return { ...expanded, context: { self, files: places, args: expanded.args }, self, skills: tau.skills, exposed: tau.exposed };
 		},
 		collect(outcome) {
 			let result: Outcome = outcome.ok ? { ok: true, text: outcome.text } : outcome;

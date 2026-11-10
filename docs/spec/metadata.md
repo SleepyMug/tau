@@ -1,8 +1,7 @@
 # Metadata
 
-`tau.json` declares what a tau takes from its caller, its files and its args, the APIs its code
-calls, what its programs import, and its init. Without it, a tau takes no files and no args, and
-calls no API.
+`tau.json` declares what a tau takes from its caller, its files and its args, what its programs
+import, and its init. Without it, a tau takes no files and no args.
 
 ```json
 {
@@ -30,8 +29,7 @@ calls no API.
     },
     "required": ["edits"]
   },
-  "apis": { "@acme/file-edits": "^1.0.0" },
-  "exposes": ["@acme/file-edits"]
+  "exposes": ["file-edits"]
 }
 ```
 
@@ -42,11 +40,9 @@ Each key is optional, and any other is refused:
   name to what it is (see [Files](#files)). A call gives a path for every one, and may give
   others, with their modes (see [Calls](calls.md)).
 - **`args`** is the **schema** of the args (see [Args](#args)).
-- **`apis`** names the APIs the tau's code calls, each a contract, from its name to the range of
-  its versions the tau works with (see [APIs](apis.md)).
-- **`exposes`** names what the agent's programs import, each once, by the name they import it as:
-  an API, one `apis` names, or a package of the tau's own (see [Packages](packages.md)). Without
-  it, they import every API.
+- **`exposes`** names the packages of the tau's own that the agent's programs import, each once,
+  by the name they import it as, for a runtime to present to the model (see
+  [Packages](packages.md)). Without it, the runtime presents none.
 - **`init`** is a command, a string that is not blank, that a runtime runs before the agent, and
   which may do the run without it (see [Init](init.md)).
 

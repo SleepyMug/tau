@@ -5,5 +5,5 @@
 the run without it (see [Init](init.md)).
 
 What the model learns of the call, the prompt tells it: the prompt names files, args and what lies
-in them, and says what the agent needs of the rest, which the agent's programs read through the
-[tau API](tau-api.md). A runtime need not show the model the call otherwise.
+in them, and says what the agent needs of the rest, which the agent's programs read in the run's
+context (see [The run context](context.md)). A runtime need not show the model the call otherwise.

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { type Admitted, createBackendSdk, type ImplementationCatalog, type Placed, placesUnder, type Rendered } from "../backend/backend.js";
+import { type Admitted, createBackendSdk, type Placed, placesUnder, type Rendered } from "../backend/backend.js";
 import type { WireAdaptor } from "../client/adaptor.js";
 import type { Json, Outcome, Status, Trace } from "../core/model.js";
 import { messageOf } from "../core/util.js";
@@ -38,16 +38,9 @@ export type DummyAgent = (run: DummyRun) => Promise<Outcome>;
 export interface DummyOptions {
 	/** By default {@link echoAgent}. */
 	readonly agent?: DummyAgent;
-	/** By default {@link anyImplementation}. */
-	readonly implementations?: ImplementationCatalog;
 	/** Where the dummy backend keeps results, one file each; by default under the system's temporary directory. */
 	readonly spool?: string;
 }
-
-/** A catalog that serves any API, as if with an implementation at the version its range gives, and holds no declarations. */
-export const anyImplementation: ImplementationCatalog = {
-	find: (contract, range) => (range === undefined ? undefined : { contract, version: range.slice(1), module: `dummy:${contract}` }),
-};
 
 /**
  * An agent that does nothing but leave something where the call asks it to, an empty file or
@@ -64,9 +57,9 @@ export const echoAgent: DummyAgent = async ({ placed, rendered }) => {
 };
 
 export function createDummyAdaptor(options: DummyOptions = {}): WireAdaptor {
-	const { agent = echoAgent, implementations = anyImplementation } = options;
+	const { agent = echoAgent } = options;
 	const spool = options.spool ?? path.join(os.tmpdir(), `tau-dummy-${os.userInfo().uid}`);
-	const sdk = createBackendSdk({ implementations });
+	const sdk = createBackendSdk();
 	const kept = (id: string, extension: "tar" | "json"): string => {
 		if (!/^[0-9a-f-]+$/u.test(id)) throw new Error(`no run ${id}`);
 		return path.join(spool, `${id}.${extension}`);

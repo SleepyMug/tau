@@ -60,26 +60,26 @@ nothing that sets them apart:
 
 The files `tau.json` declares are what the prompt and init need, and they name them (see
 [Placeholders](placeholders.md)). A caller may give more: the agent reaches an extra file through
-the args, which name it with a placeholder, and through the [tau API](tau-api.md), and the
-runtime places and puts it as any other.
+the args, which name it with a placeholder, and through the run's context (see
+[The run context](context.md)), and the runtime places and puts it as any other.
 
 The paths of the `out` and `inout` files are every path of the caller's the run may change: a run
 writes nowhere its caller has not given it as such a file, and a runtime can list them all, from
-the call and the tau, before the run starts. Anything else a run changes, it changes through its
-APIs.
+the call and the tau, before the run starts. Anything else a run changes, it changes through what
+the runtime gives it (see [Running](running.md)).
 
 ## Args
 
 The args are the caller's data. A runtime checks them against the schema, as JSON Schema does,
 before the run starts, and their placeholders, and refuses a call whose args do not fit, or name
 what they cannot, or themselves (see [Placeholders](placeholders.md)). Once the files are placed,
-it expands the args' placeholders, and that is how the agent sees them: in the prompt, and through
-the [tau API](tau-api.md).
+it expands the args' placeholders, and that is how the agent sees them: in the prompt, and in the
+run's context (see [The run context](context.md)).
 
 ## Passing a call on
 
 An agent that runs another tau is that run's caller, and its paths are in its own view: it gives a
-file of its own by its place, as the tau API has it. An arg that named one of its files reaches it
+file of its own by its place, as its run's context has it (see [Runs that nest](running.md#runs-that-nest)). An arg that named one of its files reaches it
 expanded, as a place in its view; to point the new run's agent there, it names the new run's file
 with a placeholder, in that run's args, as in `"${src}/index.html"`, and gives `src` the place.
 

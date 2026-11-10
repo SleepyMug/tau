@@ -286,7 +286,7 @@ test("a call may give extra files, each with its mode, which the args name, and 
 
 test("a tau without tau.json takes no files and no args", () => {
 	const tau = loadTau(write("plain", { "PROMPT.md": "Say hi. Costs $1, and $${x} stays as it is." }));
-	assert.deepEqual([tau.description, tau.files, tau.args, tau.apis, tau.exposed, tau.init], [undefined, {}, undefined, [], [], undefined]);
+	assert.deepEqual([tau.description, tau.files, tau.args, tau.exposed, tau.init], [undefined, {}, undefined, [], undefined]);
 	const empty = { files: {}, paths: {}, args: {} };
 	assert.deepEqual(tau.resolve({}, cwd), empty);
 	assert.deepEqual(tau.resolve({ files: {}, args: {} }, cwd), empty);
@@ -307,10 +307,10 @@ test("a tau's init is the command tau.json gives, its placeholders the tau's own
 	assert.equal(tau.expand(call, { notes: "/tau/in/n.md" }, "/tau/self").init, "node /tau/self/init.mts /tau/in/n.md ${HOME}");
 	assert.equal(tau.expand(call, { notes: "/n.md" }, "/my taus/it's").init, `node '/my taus/it'\\''s'/init.mts /n.md \${HOME}`);
 	assert.equal(tauOf("noinit", {}).expand({ files: {}, args: {} }, {}).init, undefined);
-	// It names no arg: a program reads the args through the tau API.
+	// It names no arg: a program reads the args from the run context.
 	const refused = (init: string) => () =>
 		tauOf("initnames", { args: { type: "object", properties: { term: { type: "string", description: "A term." } } }, init });
-	assert.throws(refused("node ${self}/init.mts ${term}"), /tau\.json: `init`: \$\{term\} names neither \$\{self\} nor a file: init reads the args through the tau API/);
+	assert.throws(refused("node ${self}/init.mts ${term}"), /tau\.json: `init`: \$\{term\} names neither \$\{self\} nor a file: init reads the args from the run context/);
 	assert.throws(refused("node ${self"), /tau\.json: `init`: \$\{self is not closed/);
 });
 

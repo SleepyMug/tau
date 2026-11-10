@@ -1,20 +1,20 @@
 import { type Dirent, lstatSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
-/** What a runtime reads of a tau; node_modules/ too, when the tau exposes a package of its own. */
-const READ = ["PROMPT.md", "tau.json", "skills"];
+/** What a runtime reads of a tau: its packages too, which it makes the agent's programs import (docs/spec/packages.md). */
+const READ = ["PROMPT.md", "tau.json", "skills", "node_modules"];
 /** More links in a row than this is a loop; Linux gives up at 40 too. */
 const MAX_HOPS = 40;
 
 /**
- * The symlinks of what a runtime reads of the tau at `dir`, with its node_modules/ when it has
- * `packages` of its own, that break the spec: each is relative, and leads, through any further
- * symlinks, all relative, to something that exists in the tau. A symlink to a directory is
- * followed, and what it leads to is checked the same way. One problem per symlink.
+ * The symlinks of what a runtime reads of the tau at `dir`, its node_modules/ included, that break
+ * the spec: each is relative, and leads, through any further symlinks, all relative, to something
+ * that exists in the tau. A symlink to a directory is followed, and what it leads to is checked the
+ * same way. One problem per symlink.
  */
-export function linkProblems(dir: string, packages: boolean): string[] {
+export function linkProblems(dir: string): string[] {
 	const root = realpathSync(dir);
-	const parts = (packages ? [...READ, "node_modules"] : READ).map((part) => path.join(root, part));
+	const parts = READ.map((part) => path.join(root, part));
 	return rootedLinkProblems(root, parts, { inside: "a tau", outside: "the tau" }, (file) => path.relative(root, file) || ".");
 }
 

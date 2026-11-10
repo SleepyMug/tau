@@ -12,8 +12,8 @@ tau runs agents as a service. The **runtime** this spec speaks of is two parts, 
   the run to one of its **wire adaptors**, each the part of the client that talks to one backend,
   chosen by name among those the client is given. An adaptor packages the tau and the files,
   carries them, and puts the outputs at the caller's paths. The adaptors there are are built in:
-  the **dummy** adaptor, whose backend is its own, in the client's process, and the **fleet**
-  adaptor, whose backend is the fleet service (see [The fleet adaptor](fleet.md)).
+  the **dummy** adaptor, whose backend is its own, in the client's process, and the **socket**
+  adaptor, whose backend serves a Unix socket (see [The socket adaptor](socket.md)).
 - The **backend** runs the agent. The backend SDK (see [Backend](backend.md)) does for it what this
   spec asks of every backend alike: it admits a call, checks its files once placed, renders what
   the agent is given, and collects the run's report. Where and how the agent runs, the model, its
@@ -21,8 +21,9 @@ tau runs agents as a service. The **runtime** this spec speaks of is two parts, 
 
 What a runtime must do, the side that does it does: the client checks a call and its paths (see
 [Calls](calls.md) and [Paths](paths.md)) before the run goes anywhere, and its adaptor puts the
-outputs (see [Results](results.md)); the backend chooses the places, links each API to its
-implementation (see [Implementations](implementations.md)), runs init and the agent (see
+outputs (see [Results](results.md)); the backend chooses the places, gives the agent the tau's
+packages and the run's context (see [Runtimes](runtimes.md) and [The run context](context.md)),
+runs init and the agent (see
 [Init](init.md) and [Running](running.md)), and checks what the agent left.
 
 ## What is modelled
@@ -93,7 +94,7 @@ interface WireAdaptor {
 ```
 
 - **Submit.** The adaptor hands the run to its backend, which may refuse it: a call that does not
-  fit the tau, or an API it implements at no version that serves the tau's range. It gives the
+  fit the tau, or one it cannot run, such as one whose tau's prompt asks what it lacks. It gives the
   run's **id**, which means the same run to it in any process.
 - **Status.** The adaptor gives the run's status, at once: running, or ended, with its latest
   result's number and how that result ended.
@@ -116,9 +117,9 @@ it. So an adaptor and a backend never see a finish or a wait.
 
 The client keeps, for each run it started, its adaptor, its id, and its delivery, in a **run
 store**, until it is released, so that whoever finishes or releases the run, in the process that
-started it or another sharing the store, can. Runs nest: an agent's program that runs a tau,
-through the tau API, is the caller of that run (see [The tau API](tau-api.md)), and the backend
-can make it as a client does.
+started it or another sharing the store, can. Runs nest: an agent that runs a tau, through the
+`tau` command, is the caller of that run (see [Runs that nest](running.md#runs-that-nest)), and the
+backend can make it as a client does.
 
 ## Traces
 
@@ -129,22 +130,6 @@ as the backend records it. It is for a person looking into a run, not a result (
 backend's to choose, and may change from one version of a backend to the next. Nothing relies on
 it: not a tau, not a caller's program, and not whether the run succeeded. A trace may hold what
 the run's files and its agent's tools did, so it goes only to whoever may finish the run.
-
-## Contracts
-
-```ts
-interface WireAdaptor {
-  contract?(name: string, range: string | undefined, dir: string, signal?: AbortSignal): Promise<Contract>;
-}
-```
-
-An adaptor may have one more verb, which no run uses: **contract** puts at `dir`, a directory that
-does not exist, the contract `name` at the newest version its backend implements, within `range`
-when one is given, its `package.json` and declarations and nothing else (see
-[Contracts](contracts.md)), and gives its `name`, `version` and `description`. It is how the
-author of a tau gets a contract that only the backend publishes (see [Authoring](authoring.md)).
-The adaptor checks what it puts as from a backend it does not trust: a contract's package, of the
-name asked for, at a version within the range, holding no symlink.
 
 ## Trust
 
@@ -186,18 +171,18 @@ uses as arguments, never loading it by name:
 |---|---|---|
 | `core` (`@sleepymug/tau/core`) | The format and the semantics: reading and checking a tau, a call and its paths, the placeholders, the envelope, the job, the delivery and the report | nothing |
 | `client` (`@sleepymug/tau`) | The client SDK, the `WireAdaptor` it takes, and the run store | `core` |
-| `backend` (`@sleepymug/tau/backend`) | The backend SDK, and the implementation catalog it takes | `core` |
+| `backend` (`@sleepymug/tau/backend`) | The backend SDK | `core` |
 | `transfer` (`@sleepymug/tau/transfer`) | Contents, and delivery, for adaptors and backends | `core` |
-| `wire-tar` (`@sleepymug/tau/wire-tar`) | Calls, results and contracts as tar archives | `core`, `transfer` |
-| `adaptors` (`@sleepymug/tau/adaptors`) | The built-in wire adaptors: `dummy`, and `fleet`, with its transports | any of the above |
-| `cli` | The `tau` command, which puts the client and its adaptors together, and pulls contracts for a tau's author | `core`, `client`, `adaptors`, `wire-tar`, for npm's tarballs |
+| `wire-tar` (`@sleepymug/tau/wire-tar`) | Calls and results as tar archives | `core`, `transfer` |
+| `adaptors` (`@sleepymug/tau/adaptors`) | The built-in wire adaptors: `dummy`, and `socket`, with its transports | any of the above |
+| `cli` | The `tau` command, which puts the client and its adaptors together | `core`, `client`, `adaptors` |
 
 Neither the client nor the backend SDK knows how files move.
 
 ## Open
 
-- Listing the contracts a backend implements, so that a client can check a tau's APIs before it
-  submits a run, and its author choose among them.
+- Declaring what a tau needs of its runtime beyond the format, such as the modules its packages
+  import, or the commands its prompt runs, so that a client can check it before it submits a run.
 - Asking a run's agent to improve its result, after which its status gives the new one's number,
   and its result the new one; and asking for a result by its number.
 - A trace that streams, as the run goes on, rather than given whole.

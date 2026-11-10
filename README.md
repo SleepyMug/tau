@@ -1,8 +1,8 @@
 # tau
 
 **tau** (Transportable Agent Unit) runs agents as a service. A tau packages an agent as a
-directory: its prompt, the files and args it takes, its skills, and the APIs it needs, contracts of
-TypeScript declarations. The `tau` command, or the client SDK, checks a tau and a call of it where
+directory: its prompt, the files and args it takes, its skills, and code of its own, which its
+agent's programs build on. The `tau` command, or the client SDK, checks a tau and a call of it where
 the caller is, and hands the run to a **wire adaptor**, which carries it to a **backend** that runs
 the agent with the **backend SDK**, and puts what comes back at the caller's paths.
 
@@ -12,7 +12,6 @@ the agent with the **backend SDK**, and puts what comes back at the caller's pat
 - [docs/spec/](docs/spec/index.md): the spec; [protocol.md](docs/spec/protocol.md) has the parts
   of the runtime, and the modules.
 - [docs/VOCAB.md](docs/VOCAB.md): the names of things, and those no longer used.
-- [contracts/](contracts/): the tau API, `@sleepymug/tau-api`.
 
 | Module | Import | What it is |
 |---|---|---|
@@ -21,8 +20,8 @@ the agent with the **backend SDK**, and puts what comes back at the caller's pat
 | `src/backend` | `@sleepymug/tau/backend` | The backend SDK: `admit`, `place`, `render`, `collect` ([backend.md](docs/spec/backend.md)) |
 | `src/transfer` | `@sleepymug/tau/transfer` | Helpers for moving files: contents, checked as they come, and outputs merged at their targets |
 | `src/wire-tar` | `@sleepymug/tau/wire-tar` | Calls and results as tar archives ([serialization.md](docs/spec/serialization.md)) |
-| `src/adaptors` | `@sleepymug/tau/adaptors` | The built-in wire adaptors: `dummy`, a loopback to a backend in the same process, and `fleet`, runs on the fleet service ([fleet.md](docs/spec/fleet.md)) |
-| `src/cli` | the `tau` command | `check`, `describe`, `run`, `start`, `status`, `result`, `trace`, `finish`, `release`, `wait` |
+| `src/adaptors` | `@sleepymug/tau/adaptors` | The built-in wire adaptors: `dummy`, a loopback to a backend in the same process, and `socket`, runs on a backend that serves a Unix socket ([socket.md](docs/spec/socket.md)) |
+| `src/cli` | the `tau` command, and `@sleepymug/tau/cli`, which runs it | `check`, `describe`, `run`, `start`, `status`, `result`, `trace`, `finish`, `release`, `wait` |
 
 ## Commands
 

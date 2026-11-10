@@ -96,7 +96,7 @@ test("a run goes from the caller's paths, through a wire adaptor, to a backend, 
 	const [{ placed, rendered }] = seen as [DummyRun];
 	const at = (name: string) => placed.places[name] as string;
 	assert.equal(rendered.prompt, `Edit ${at("site")} by ${at("rules")}, in a dry, as ${at("rules")} says, tone, with ${at("extras")}; report to ${at("report")}, and write ${at("pages")}.\n`);
-	assert.deepEqual(rendered.context, { files: placed.places, args: { tone: `dry, as ${at("rules")} says,` } });
+	assert.deepEqual(rendered.context, { self: rendered.self, files: placed.places, args: { tone: `dry, as ${at("rules")} says,` } });
 	assert.deepEqual(rendered.skills.map(({ name }) => name), ["edit"]);
 	assert.equal(path.basename(at("extras")), "extras");
 
@@ -151,15 +151,6 @@ test("the call and the caller's paths are checked before the run goes anywhere",
 	assert.throws(() => client.check(TAU, files("missing.md"), caller), /rules: \S+\/missing\.md does not exist/u);
 	assert.equal(client.check(TAU, CALL, caller).call.paths.report, path.join(caller, "out/report.md"));
 	assert.equal(jobs.length, 0);
-});
-
-test("a backend that refuses a run refuses it to the caller: here, an API it implements at no version that serves", async () => {
-	const tau = write("tau-api", {
-		"PROMPT.md": "Go.\n",
-		"tau.json": JSON.stringify({ apis: { "@acme/notes": "^1.2.0" } }),
-	});
-	const adaptor = createDummyAdaptor({ spool: path.join(tmp, "spool"), implementations: { find: () => undefined } });
-	await assert.rejects(createClient({ adaptors: { dummy: adaptor } }).run(tau, {}), /no implementation serves:\n {2}@acme\/notes@\^1\.2\.0/u);
 });
 
 test("a run is finished as often as asked, from any client sharing its run store, each time putting its outputs, until it is released", async () => {

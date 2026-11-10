@@ -25,11 +25,9 @@ await client.release(run);                                              // … a
 ```
 
 - `load(dir)` reads and checks the tau at `dir`, as [Directory](directory.md),
-  [Metadata](metadata.md), [Placeholders](placeholders.md), [APIs](apis.md) and
-  [Packages](packages.md) have it, and gives its `description`, `files`, `args`, `apis`, each a
-  contract's name and range, `exposed`, `skills` and `init`. It reads nothing of `.tau/`, loads no
-  TypeScript, and checks neither the APIs' declarations nor the packages' code, which are their
-  authors'.
+  [Metadata](metadata.md), [Placeholders](placeholders.md) and [Packages](packages.md) have it,
+  and gives its `description`, `files`, `args`, `exposed`, `skills` and `init`. It reads nothing
+  of `.tau/`, loads no TypeScript, and checks none of the packages' code, which is their authors'.
 - `check(dir, call, cwd)` reads the tau, resolves `call` against it, its paths against `cwd`, and
   checks the args against the schema and their placeholders (see [Calls](calls.md)), and the
   caller's paths, as a run's are when it starts (see [Paths](paths.md)), without starting it.
@@ -63,27 +61,23 @@ await client.release(run);                                              // … a
 ## Wire adaptors
 
 A **wire adaptor** is anything with `submit`, `status`, `result`, `trace` and `release` (see
-[Protocol](protocol.md#a-runs-life)), and maybe `contract` (see
-[Protocol](protocol.md#contracts)), which the client is given, never loads. It is the part of
+[Protocol](protocol.md#a-runs-life)), which the client is given, never loads. It is the part of
 the client that takes in what its backend sends, and checks it before it puts anything at the
 caller's paths, with the transfer helpers or as it will (see [Protocol](protocol.md#transfer)).
 
-The **dummy** adaptor, `createDummyAdaptor({ agent, implementations, spool })`, packs a job as a
+The **dummy** adaptor, `createDummyAdaptor({ agent, spool })`, packs a job as a
 tar archive (see [Serialization](serialization.md)), and a backend of its own, in the same process,
 built on the backend SDK (see [Backend](backend.md)), unpacks it, runs `agent` on it, and keeps the
 result, as an archive too, with the run's status and trace, in `spool`, until the run is released;
 its result unpacks the archive at the caller's paths. A run ends, with its one result, before
 `submit` gives its id. Its trace's format is `tau-dummy`: its own events, `admitted`, with the
 envelope, `rendered`, with the prompt, and `ended`, with how the run ended, and between them what
-`agent` adds, with `trace(event)`. By default, its catalog serves
-every API, and its agent, `echoAgent`, leaves an empty file or directory at each `out` file's
-place, and gives back the prompt, rendered, as its text: a dry run.
+`agent` adds, with `trace(event)`. By default, its agent, `echoAgent`, leaves an empty file or
+directory at each `out` file's place, and gives back the prompt, rendered, as its text: a dry run.
 
-The dummy adaptor gives no contract: its backend holds no declarations.
-
-The **fleet** adaptor, `createFleetAdaptor({ transport, project })`, carries a run to the fleet
-service, and gives the contracts it implements, over the service's socket, `fleetSocket(path)`,
-or another transport (see [The fleet adaptor](fleet.md)).
+The **socket** adaptor, `createSocketAdaptor({ transport, project })`, carries a run to a backend
+over its socket, `socketTransport(path)`, or another transport (see
+[The socket adaptor](socket.md)).
 
 ## The `tau` command
 
@@ -98,13 +92,7 @@ tau trace <run>
 tau finish <run> [--json]
 tau release <run>
 tau wait <run> [--json] [--trace <file>]
-tau api add <name>[@<range>] [--from <npm|path> | --from-provider] [dir]
-tau api remove <name> [dir]
-tau api sync [dir]
 ```
-
-`tau api` keeps a tau's APIs, in `tau.json`, and their contracts, in `.tau/`, for its author (see
-[Authoring](authoring.md)).
 
 A call is JSON, `{"files": {...}, "args": {...}}`: `--call <file>`, `-` for stdin, or
 `--call-json '<json>'`; without one, `{}`. Its paths are relative to the working directory. `run`,
@@ -116,8 +104,8 @@ each event, a line each; `--trace <file>` has `run` and `wait` write it so to th
 to the working directory, once the run finished, before they release it. The command keeps runs, and the dummy backend's
 results, in `$TAU_STATE_DIR`, by default `tau` in `$XDG_STATE_HOME`, or in `~/.local/state`. A run
 goes through `--adaptor`, or `$TAU_ADAPTOR`, or the config file's `adaptor`, or `dummy`: `dummy`, or
-`fleet`, the fleet service at its socket, `$TAU_FLEET_SOCKET`, or the config file's, or in the dsh
-home, each run's session in the dsh workspace of the working directory. Interrupting `run` releases
+`socket`, the backend at its socket, `$TAU_SOCKET`, or the config file's, told the working
+directory as the run's `project`. Interrupting `run` releases
 the run, which then fails; interrupting `finish` or `wait` stops the waiting, not the run.
 
 ### The config file
@@ -128,13 +116,13 @@ else in it than the following fails every command, saying where and why:
 
 ```yaml
 # The adaptor a run goes through, unless --adaptor or $TAU_ADAPTOR names one.
-adaptor: fleet
+adaptor: socket
 # The options of the adaptors built into tau, each optional.
 adaptors:
-  fleet:
-    # The fleet service's socket, unless $TAU_FLEET_SOCKET names one: relative to the file's
-    # folder, a leading ~ the user's home.
-    socket: ~/.dsh/fleet/tau.sock
+  socket:
+    # The backend's socket, unless $TAU_SOCKET names one: relative to the file's folder, a
+    # leading ~ the user's home.
+    path: ~/.dsh/tau/tau.sock
 ```
 
 The command line comes first, then the environment, then the file, then the defaults.

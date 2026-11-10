@@ -8,8 +8,7 @@ import { fileURLToPath } from "node:url";
  * Which modules each module may import (docs/spec/protocol.md#modules): the core none; the client,
  * the backend SDK and the transfer helpers the core alone, none of them another, so that neither
  * the client nor the backend SDK knows how files move; the tar codec the transfer helpers too; a
- * wire adaptor any of those; and the command, which puts the client and its adaptors together, and
- * reads the tar archives npm packs a contract in.
+ * wire adaptor any of those; and the command, which puts the client and its adaptors together.
  */
 const ALLOWED: Readonly<Record<string, readonly string[]>> = {
 	core: [],
@@ -18,7 +17,7 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
 	transfer: ["core"],
 	"wire-tar": ["core", "transfer"],
 	adaptors: ["core", "client", "backend", "transfer", "wire-tar"],
-	cli: ["core", "client", "adaptors", "wire-tar"],
+	cli: ["core", "client", "adaptors"],
 };
 
 test("each module imports only what it may", () => {

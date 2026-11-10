@@ -3,21 +3,19 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { type Admitted, catalogOf, createBackendSdk, type Implementation, type Placed, placesUnder } from "../backend/backend.js";
-import { readContract } from "../core/apis.js";
+import { type Admitted, createBackendSdk, type Placed, placesUnder } from "../backend/backend.js";
 import type { Outcome } from "../core/model.js";
 import { removeAll } from "../transfer/deliver.js";
 import { packResult, unpackCall } from "../wire-tar/archive.js";
-import { packContract } from "../wire-tar/contract.js";
-import { type FleetHandler, type FleetRequest, readFleetContractRequest, readFleetRunRequest } from "./fleet.js";
+import { readRunRequest, type RequestHandler, type SocketRequest } from "./socket.js";
 
 /**
- * A fleet service for the tests, in this process, built on the backend SDK: each run's agent
+ * A backend for the tests, in this process, built on the backend SDK: each run's agent
  * runs as it is submitted, and has ended once the agent has and the gate is open; its result is
  * collected again each time it is asked for, so that what the agent did since shows. Its traces
  * are its own, {@link FAKE_TRACE}.
  */
-export const FAKE_TRACE = "fake-fleet";
+export const FAKE_TRACE = "fake-backend";
 
 interface Kept {
 	placed: Placed;
@@ -26,9 +24,9 @@ interface Kept {
 	outcome?: Outcome;
 }
 
-export class FakeFleet {
+export class FakeBackend {
 	/** Each submit's request, as it came. */
-	readonly submitted: FleetRequest[] = [];
+	readonly submitted: SocketRequest[] = [];
 	readonly released: string[] = [];
 	/** The signal of each request, by its op, the last one's. */
 	readonly signals = new Map<string, AbortSignal>();
@@ -36,27 +34,17 @@ export class FakeFleet {
 	/** What a run's end waits for, besides its agent, as a run submitted takes it. */
 	gate: Promise<void> = Promise.resolve();
 
-	/** @param implementations - the APIs it serves, and gives the contracts of. */
-	constructor(
-		private readonly agent: (placed: Placed) => Promise<Outcome>,
-		private readonly implementations: readonly Implementation[] = [],
-	) {}
+	constructor(private readonly agent: (placed: Placed) => Promise<Outcome>) {}
 
-	readonly handle: FleetHandler = async (request, body, signal) => {
+	readonly handle: RequestHandler = async (request, body, signal) => {
 		this.signals.set(request.op, signal);
-		const asked = readFleetContractRequest(request);
-		if (asked !== undefined) {
-			const found = catalogOf(this.implementations).find(asked.name, asked.range);
-			if (found?.declarations === undefined) throw new Error(`no contract ${asked.name}${asked.range === undefined ? "" : ` within ${asked.range}`}`);
-			return { value: readContract(found.declarations), body: Readable.from(packContract(found.declarations)) };
-		}
-		const run = readFleetRunRequest(request);
+		const run = readRunRequest(request);
 		if (run === undefined) throw new Error(`no op ${request.op}`);
 		switch (run.op) {
 			case "submit": {
 				this.submitted.push(request);
-				const sdk = createBackendSdk({ implementations: catalogOf(this.implementations) });
-				const work = await mkdtemp(path.join(os.tmpdir(), "tau-fake-fleet-"));
+				const sdk = createBackendSdk();
+				const work = await mkdtemp(path.join(os.tmpdir(), "tau-fake-backend-"));
 				const tau = path.join(work, "tau");
 				let admitted: Admitted | undefined;
 				let places: { readonly [name: string]: string } = {};

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import type { Envelope } from "../core/model.js";
-import { catalogOf, createBackendSdk, initDecision, placesUnder } from "./backend.js";
+import { createBackendSdk, initDecision, placesUnder } from "./backend.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-server-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));
@@ -26,7 +26,6 @@ const TAU = write("tau", {
 			total: { kind: "file", mode: "out", description: "Their sum." },
 		},
 		args: { type: "object", properties: { style: { type: "string" } } },
-		apis: { "@acme/notes": "^1.2.0" },
 		init: "node ${self}/init.mjs ${numbers}",
 	}),
 });
@@ -36,12 +35,6 @@ const ENVELOPE: Envelope = {
 	args: { style: "words" },
 };
 
-const implementations = catalogOf([
-	{ contract: "@acme/notes", version: "1.1.0", module: "/impl/notes-1.1.js" },
-	{ contract: "@acme/notes", version: "1.4.0", module: "/impl/notes-1.4.js", declarations: "/impl/notes-1.4" },
-	{ contract: "@acme/notes", version: "1.3.0", module: "/impl/notes-1.3.js" },
-	{ contract: "@acme/notes", version: "2.0.0", module: "/impl/notes-2.0.js" },
-]);
 let runs = 0;
 /** A fresh work directory, holding the tau, as a backend would have placed it. */
 const workspace = () => {
@@ -57,20 +50,11 @@ const placeFiles = (work: string, envelope: Envelope) => {
 	return places;
 };
 
-test("a catalog finds the newest implementation within a range, or of all without one", () => {
-	assert.equal(implementations.find("@acme/notes", "^1.2.0")?.module, "/impl/notes-1.4.js");
-	assert.equal(implementations.find("@acme/notes", "^1.4.0")?.declarations, "/impl/notes-1.4");
-	assert.equal(implementations.find("@acme/notes", "^1.5.0"), undefined);
-	assert.equal(implementations.find("@acme/notes")?.version, "2.0.0");
-	assert.equal(implementations.find("@acme/other"), undefined);
-});
-
-test("a call is admitted against its tau, its APIs linked; then placed, rendered, and collected, as often as the run goes on", () => {
+test("a call is admitted against its tau; then placed, rendered, and collected, as often as the run goes on", () => {
 	const at = workspace();
-	const admitted = createBackendSdk({ implementations }).admit(ENVELOPE, at.tau);
+	const admitted = createBackendSdk().admit(ENVELOPE, at.tau);
 	assert.equal(admitted.tau.dir, at.tau);
 	assert.deepEqual(admitted.envelope, { files: { numbers: { mode: "in", kind: "file", base: "numbers.txt" }, total: { mode: "out", kind: "file", base: "total.txt" } }, args: { style: "words" } });
-	assert.deepEqual(admitted.links.map(({ api, implementation }) => [api.name, implementation.module]), [["@acme/notes", "/impl/notes-1.4.js"]]);
 
 	const places = placeFiles(at.work, admitted.envelope);
 	const numbers = path.join(at.work, "files", "numbers", "numbers.txt");
@@ -81,7 +65,8 @@ test("a call is admitted against its tau, its APIs linked; then placed, rendered
 	assert.equal(rendered.prompt, `Sum ${numbers} into ${total}, in words.\n`);
 	assert.equal(rendered.init, `node ${at.tau}/init.mjs ${numbers}`);
 	assert.equal(rendered.self, at.tau);
-	assert.deepEqual(rendered.context, { files: { numbers, total }, args: { style: "words" } });
+	assert.deepEqual(rendered.context, { self: at.tau, files: { numbers, total }, args: { style: "words" } });
+	assert.deepEqual(placed.render("/agent/tau").context.self, "/agent/tau");
 	assert.equal(placed.render("/agent/tau").init, `node /agent/tau/init.mjs ${numbers}`);
 
 	const failed = placed.collect({ ok: true, text: "Six." });
@@ -96,17 +81,16 @@ test("a call is admitted against its tau, its APIs linked; then placed, rendered
 });
 
 test("a call that cannot run as declared is refused before any file is taken", () => {
-	const sdk = createBackendSdk({ implementations });
-	const refused = (envelope: unknown, pattern: RegExp, by = sdk) => assert.throws(() => by.admit(envelope, workspace().tau), pattern);
+	const sdk = createBackendSdk();
+	const refused = (envelope: unknown, pattern: RegExp) => assert.throws(() => sdk.admit(envelope, workspace().tau), pattern);
 	refused({ ...ENVELOPE, tau: true }, /^TypeError: the call breaks the protocol: it: unknown key "tau"$/u);
 	refused({ ...ENVELOPE, args: { style: 3 } }, /^TypeError: the call does not fit the tau:\n {2}args\.style: must be string$/u);
 	refused({ files: { ...ENVELOPE.files, total: { mode: "inout", kind: "file", base: "total.txt" } }, args: {} }, /total: is an `inout` in the call, and an `out` in the tau/u);
-	refused(ENVELOPE, /^Error: no implementation serves:\n {2}@acme\/notes@\^1\.2\.0$/u, createBackendSdk({ implementations: catalogOf([{ contract: "@acme/notes", version: "2.0.0", module: "/x" }]) }));
 });
 
 test("files are placed as the call asks: each where its base name is kept, an input as it was, an output in a directory that exists", () => {
 	const at = workspace();
-	const admitted = createBackendSdk({ implementations }).admit(ENVELOPE, at.tau);
+	const admitted = createBackendSdk().admit(ENVELOPE, at.tau);
 	assert.throws(
 		() => admitted.place({ numbers: path.join(at.work, "numbers"), total: "total.txt" }),
 		(error: Error) => {

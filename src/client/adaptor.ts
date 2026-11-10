@@ -1,4 +1,3 @@
-import type { Contract } from "../core/apis.js";
 import type { Delivery, Job, Numbered, Status, Trace } from "../core/model.js";
 
 /**
@@ -11,8 +10,7 @@ export interface WireAdaptor {
 	/**
 	 * Hand a run to the backend. Aborting `signal` stops the handing over.
 	 * @returns the run's id, by which this adaptor knows it, from any process.
-	 * @throws when the backend refuses the run, such as when it implements no version of an API
-	 * that serves the tau's.
+	 * @throws when the backend refuses the run, such as when the call does not fit the tau.
 	 */
 	submit(job: Job, signal?: AbortSignal): Promise<string>;
 	/**
@@ -37,12 +35,4 @@ export interface WireAdaptor {
 	/** Let the backend drop the run `id`, stopping it if it has not ended; then nothing else knows it. */
 	release(id: string): Promise<void>;
 	// No `finish` or `wait`: the client's are its status until it ended, then its result, and then its release.
-	/**
-	 * Optional, and no run uses it (docs/spec/protocol.md#contracts): put at `dir`, which does not
-	 * exist, the contract `name`, its package.json and declarations, at the newest version the
-	 * backend implements within `range`, or of all without one, checked as from a backend the
-	 * adaptor does not trust, and give its name, version and description.
-	 * @throws when the backend implements no such version.
-	 */
-	contract?(name: string, range: string | undefined, dir: string, signal?: AbortSignal): Promise<Contract>;
 }
