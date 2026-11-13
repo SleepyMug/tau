@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package tau.v1;
+
+import "google/protobuf/struct.proto";
+
+// Runs of taus on a backend: each started from a call, which carries its
+// tau, running until it has a result, its latest result fetched as often as
+// asked, and released once its caller is done with it. A run is known by
+// the id its submit gives.
+service Runs {
+  // Start a run. The first request says what names the run; those after it
+  // carry the call, as a tar archive, which carries its tau. The backend may
+  // refuse the call, as one that does not fit its tau.
+  rpc Submit(stream SubmitRequest) returns (SubmitResponse);
+  // Where a run is, at once.
+  rpc Status(StatusRequest) returns (StatusResponse);
+  // A run's latest result: the first response gives its number, those after
+  // it the result, as a tar archive. Refused while the run has none.
+  rpc Result(ResultRequest) returns (stream ResultResponse);
+  // What a run's agent did so far, in a format the backend names, for a
+  // person looking into the run.
+  rpc Trace(TraceRequest) returns (TraceResponse);
+  // Drop a run, stopping it if it has not ended; then nothing knows it.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+}
+
+message SubmitRequest {
+  oneof request {
+    // First: what names the run, and where its caller is.
+    SubmitStart start = 1;
+    // Then: the call, as a tar archive.
+    bytes chunk = 2;
+  }
+}
+
+message SubmitStart {
+  // What names the run: the name of its tau's directory.
+  string title = 1;
+  // The caller's folder, absolute, such as its working directory, which the
+  // backend may use, as for where it lists the run.
+  optional string project = 2;
+}
+
+message SubmitResponse {
+  // The run's id.
+  string id = 1;
+}
+
+message StatusRequest {
+  string id = 1;
+}
+
+message StatusResponse {
+  oneof state {
+    // The run has no result yet.
+    Running running = 1;
+    // The run has a result, its latest that below.
+    Ended ended = 2;
+  }
+}
+
+message Running {}
+
+message Ended {
+  // The latest result's number, counting from 1.
+  uint32 result = 1;
+  // Whether it ended well.
+  bool ok = 2;
+  // Why it did not, if it did not.
+  optional string failure = 3;
+}
+
+message ResultRequest {
+  string id = 1;
+}
+
+message ResultResponse {
+  oneof response {
+    // First: the result's number.
+    uint32 result = 1;
+    // Then: the result, as a tar archive.
+    bytes chunk = 2;
+  }
+}
+
+message TraceRequest {
+  string id = 1;
+}
+
+message TraceResponse {
+  // The format of the events, which the backend names.
+  string format = 1;
+  // What the run's agent did, in order.
+  repeated google.protobuf.Value events = 2;
+}
+
+message ReleaseRequest {
+  string id = 1;
+}
+
+message ReleaseResponse {}

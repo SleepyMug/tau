@@ -3,8 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { createDummyAdaptor } from "../adaptors/dummy.js";
-import { createSocketAdaptor, type SocketTransport } from "../adaptors/socket.js";
-import { defaultSocket, socketTransport } from "../adaptors/socket-transport.js";
+import { createRpcAdaptor, defaultRpcPlace, rpcTransport } from "../rpc/index.js";
 import type { WireAdaptor } from "../client/adaptor.js";
 import { createClient } from "../client/client.js";
 import { traceLines } from "../client/trace.js";
@@ -41,13 +40,14 @@ const USAGE = [
 	"--trace writes the run's trace to the file, as tau trace prints it, once it finished, before it is released.",
 	"",
 	"A run goes through --adaptor, or $TAU_ADAPTOR, or the config's adaptor, or dummy: dummy, a dry run in",
-	"this process, or socket, a backend on a Unix socket, at $TAU_SOCKET, or the config's. Interrupting run",
-	"releases the run; interrupting finish or wait stops the waiting.",
+	"this process, or rpc, a backend that serves tau.v1.Runs on a Unix socket, at $TAU_RPC_SOCKET, its calls",
+	"below $TAU_RPC_PATH, or at the config's. Interrupting run releases the run; interrupting finish or wait",
+	"stops the waiting.",
 	"",
 	"The config is YAML, at $TAU_CONFIG, or tau/config.yaml in $XDG_CONFIG_HOME, or in ~/.config:",
-	"  adaptor: socket",
+	"  adaptor: rpc",
 	"  adaptors:",
-	"    socket: { path: ~/.dsh/tau/tau.sock }",
+	"    rpc: { socket: ~/.fleet/fleet.sock, path: /services/tau }",
 ].join("\n");
 
 /** What the command reads and writes, and what it runs on. */
@@ -72,22 +72,23 @@ export function stateDir(env: CliContext["env"]): string {
 }
 
 /**
- * The wire adaptors built into tau, each made here, none loaded by name: `dummy`, and `socket`, at
- * the backend's socket, `$TAU_SOCKET`, or the config's, telling the backend the caller's folder,
- * `cwd`.
+ * The wire adaptors built into tau, each made here, none loaded by name: `dummy`, and `rpc`, at
+ * the backend's socket and path, `$TAU_RPC_SOCKET` and `$TAU_RPC_PATH`, or the config's, telling
+ * the backend the caller's folder, `cwd`.
  */
 export function defaultAdaptors(state: string, env: CliContext["env"], cwd: string, config: CliConfig = { adaptors: {} }): { readonly [name: string]: WireAdaptor } {
-	const socket = defaultSocket(env) ?? config.adaptors.socket?.path;
+	const place = defaultRpcPlace(env) ?? config.adaptors.rpc;
 	return {
 		dummy: createDummyAdaptor({ spool: path.join(state, "dummy") }),
-		socket: createSocketAdaptor({ transport: socket === undefined ? nowhere : socketTransport(socket), project: path.resolve(cwd) }),
+		rpc: place === undefined ? nowhere : createRpcAdaptor({ transport: rpcTransport(place), project: path.resolve(cwd) }),
 	};
 }
 
-/** The socket adaptor's transport when nothing names its socket. */
-const nowhere: SocketTransport = {
-	exchange: () => Promise.reject(new Error("the socket adaptor has no socket: set $TAU_SOCKET, or adaptors.socket.path in the config")),
-};
+/** The rpc adaptor when nothing names where its backend is. */
+const nowhere: WireAdaptor = (() => {
+	const fail = (): Promise<never> => Promise.reject(new Error("the rpc adaptor has no backend: set $TAU_RPC_SOCKET, or adaptors.rpc.socket in the config"));
+	return { submit: fail, status: fail, result: fail, trace: fail, release: fail };
+})();
 
 /** Run the command line `argv`, without the program; gives its exit code. */
 export async function main(argv: readonly string[], context: CliContext): Promise<number> {

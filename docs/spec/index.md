@@ -48,7 +48,7 @@ This spec is the reference:
     between them, a run's life, its trace, and the modules of `@sleepymug/tau`.
   - [Client](client.md): the client SDK, its wire adaptors, and the `tau` command.
   - [Backend](backend.md): the backend SDK, for backends.
-  - [The socket adaptor](socket.md): runs on a backend that serves a Unix socket, and the
+  - [The rpc adaptor](rpc.md): runs on a backend that serves `tau.v1.Runs` over Connect, and the
     transports that carry them.
   - [Serialization](serialization.md): a run's call and result as tar archives, one way to carry
     them.

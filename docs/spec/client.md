@@ -75,9 +75,9 @@ envelope, `rendered`, with the prompt, and `ended`, with how the run ended, and 
 `agent` adds, with `trace(event)`. By default, its agent, `echoAgent`, leaves an empty file or
 directory at each `out` file's place, and gives back the prompt, rendered, as its text: a dry run.
 
-The **socket** adaptor, `createSocketAdaptor({ transport, project })`, carries a run to a backend
-over its socket, `socketTransport(path)`, or another transport (see
-[The socket adaptor](socket.md)).
+The **rpc** adaptor, `createRpcAdaptor({ transport, project })`, carries a run to a backend that
+serves `tau.v1.Runs`, over a Connect transport, such as `rpcTransport({ socket, path })`'s (see
+[The rpc adaptor](rpc.md)).
 
 ## The `tau` command
 
@@ -104,8 +104,8 @@ each event, a line each; `--trace <file>` has `run` and `wait` write it so to th
 to the working directory, once the run finished, before they release it. The command keeps runs, and the dummy backend's
 results, in `$TAU_STATE_DIR`, by default `tau` in `$XDG_STATE_HOME`, or in `~/.local/state`. A run
 goes through `--adaptor`, or `$TAU_ADAPTOR`, or the config file's `adaptor`, or `dummy`: `dummy`, or
-`socket`, the backend at its socket, `$TAU_SOCKET`, or the config file's, told the working
-directory as the run's `project`. Interrupting `run` releases
+`rpc`, the backend at its socket, `$TAU_RPC_SOCKET`, its calls below `$TAU_RPC_PATH`, or the
+config file's, told the working directory as the run's `project`. Interrupting `run` releases
 the run, which then fails; interrupting `finish` or `wait` stops the waiting, not the run.
 
 ### The config file
@@ -116,13 +116,16 @@ else in it than the following fails every command, saying where and why:
 
 ```yaml
 # The adaptor a run goes through, unless --adaptor or $TAU_ADAPTOR names one.
-adaptor: socket
+adaptor: rpc
 # The options of the adaptors built into tau, each optional.
 adaptors:
-  socket:
-    # The backend's socket, unless $TAU_SOCKET names one: relative to the file's folder, a
+  rpc:
+    # The backend's socket, unless $TAU_RPC_SOCKET names one: relative to the file's folder, a
     # leading ~ the user's home.
-    path: ~/.dsh/tau/tau.sock
+    socket: ~/.fleet/fleet.sock
+    # What its calls' paths start with, if anything: here, fleet's gateway's path to the tau
+    # service.
+    path: /services/tau
 ```
 
 The command line comes first, then the environment, then the file, then the defaults.

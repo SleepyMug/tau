@@ -1,0 +1,9 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # A service is named for what it is: Runs.
+    - SERVICE_SUFFIX

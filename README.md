@@ -20,7 +20,8 @@ the agent with the **backend SDK**, and puts what comes back at the caller's pat
 | `src/backend` | `@sleepymug/tau/backend` | The backend SDK: `admit`, `place`, `render`, `collect` ([backend.md](docs/spec/backend.md)) |
 | `src/transfer` | `@sleepymug/tau/transfer` | Helpers for moving files: contents, checked as they come, and outputs merged at their targets |
 | `src/wire-tar` | `@sleepymug/tau/wire-tar` | Calls and results as tar archives ([serialization.md](docs/spec/serialization.md)) |
-| `src/adaptors` | `@sleepymug/tau/adaptors` | The built-in wire adaptors: `dummy`, a loopback to a backend in the same process, and `socket`, runs on a backend that serves a Unix socket ([socket.md](docs/spec/socket.md)) |
+| `src/adaptors` | `@sleepymug/tau/adaptors` | The dummy adaptor, a loopback to a backend in the same process |
+| `src/rpc` | `@sleepymug/tau/rpc` | The rpc adaptor, runs on a backend that serves `tau.v1.Runs` over Connect, and the routes for such a backend ([rpc.md](docs/spec/rpc.md)) |
 | `src/cli` | the `tau` command, and `@sleepymug/tau/cli`, which runs it | `check`, `describe`, `run`, `start`, `status`, `result`, `trace`, `finish`, `release`, `wait` |
 
 ## Commands
@@ -28,6 +29,7 @@ the agent with the **backend SDK**, and puts what comes back at the caller's pat
 | Command | What it does |
 |---|---|
 | `pnpm install` | install |
+| `pnpm gen` | generate `src/gen` from `proto/` with buf: `tau.v1.Runs`, and the schema with its comments |
 | `pnpm typecheck` | type-check the sources and tests |
 | `pnpm test` | build into `dist/`, then run the tests from it |
 | `node dist/cli/main.js run <dir> --call call.json` | run a tau through the dummy adaptor, whose backend prints the prompt it rendered |

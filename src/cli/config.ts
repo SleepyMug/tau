@@ -15,8 +15,11 @@ export interface CliConfig {
 	readonly adaptor?: string;
 	/** The options of the adaptors built into tau, by name. */
 	readonly adaptors: {
-		readonly socket?: {
-			/** The backend's socket, absolute, unless `$TAU_SOCKET` names one. */
+		/** Where the rpc adaptor's backend is, unless `$TAU_RPC_SOCKET` says. */
+		readonly rpc?: {
+			/** Its socket, absolute. */
+			readonly socket: string;
+			/** What its calls' paths start with, if anything. */
 			readonly path?: string;
 		};
 	};
@@ -49,12 +52,13 @@ export async function loadConfig(file: string): Promise<CliConfig> {
 
 function configOf(value: unknown, dir: string): CliConfig {
 	const top = fields(value, "it", ["adaptor", "adaptors"]);
-	const adaptors = fields(top.adaptors ?? {}, "adaptors", ["socket"]);
-	const socket = adaptors.socket === undefined ? undefined : fields(adaptors.socket, "adaptors.socket", ["path"]);
-	const at = socket?.path === undefined ? undefined : pathOf(socket.path, "adaptors.socket.path", dir);
+	const adaptors = fields(top.adaptors ?? {}, "adaptors", ["rpc"]);
+	const rpc = adaptors.rpc === undefined ? undefined : fields(adaptors.rpc, "adaptors.rpc", ["socket", "path"]);
+	const socket = rpc === undefined ? undefined : pathOf(rpc.socket, "adaptors.rpc.socket", dir);
+	const prefix = rpc?.path === undefined ? undefined : callPath(rpc.path, "adaptors.rpc.path");
 	return {
 		...(top.adaptor === undefined ? {} : { adaptor: text(top.adaptor, "adaptor") }),
-		adaptors: socket === undefined ? {} : { socket: at === undefined ? {} : { path: at } },
+		adaptors: socket === undefined ? {} : { rpc: prefix === undefined ? { socket } : { socket, path: prefix } },
 	};
 }
 
@@ -70,6 +74,12 @@ function fields(value: unknown, at: string, known: readonly string[]): { readonl
 function text(value: unknown, at: string): string {
 	if (typeof value !== "string" || value.trim() === "") throw new Error(`${at} is not a name`);
 	return value;
+}
+
+/** What a backend's calls' paths start with: a path from the root, such as `/services/tau`. */
+function callPath(value: unknown, at: string): string {
+	if (typeof value !== "string" || !value.startsWith("/")) throw new Error(`${at} is not a path from the root, such as /services/tau`);
+	return value.replace(/\/+$/u, "");
 }
 
 function pathOf(value: unknown, at: string, dir: string): string {

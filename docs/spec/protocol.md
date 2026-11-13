@@ -12,8 +12,8 @@ tau runs agents as a service. The **runtime** this spec speaks of is two parts, 
   the run to one of its **wire adaptors**, each the part of the client that talks to one backend,
   chosen by name among those the client is given. An adaptor packages the tau and the files,
   carries them, and puts the outputs at the caller's paths. The adaptors there are are built in:
-  the **dummy** adaptor, whose backend is its own, in the client's process, and the **socket**
-  adaptor, whose backend serves a Unix socket (see [The socket adaptor](socket.md)).
+  the **dummy** adaptor, whose backend is its own, in the client's process, and the **rpc**
+  adaptor, whose backend serves `tau.v1.Runs` over Connect (see [The rpc adaptor](rpc.md)).
 - The **backend** runs the agent. The backend SDK (see [Backend](backend.md)) does for it what this
   spec asks of every backend alike: it admits a call, checks its files once placed, renders what
   the agent is given, and collects the run's report. Where and how the agent runs, the model, its
@@ -174,8 +174,9 @@ uses as arguments, never loading it by name:
 | `backend` (`@sleepymug/tau/backend`) | The backend SDK | `core` |
 | `transfer` (`@sleepymug/tau/transfer`) | Contents, and delivery, for adaptors and backends | `core` |
 | `wire-tar` (`@sleepymug/tau/wire-tar`) | Calls and results as tar archives | `core`, `transfer` |
-| `adaptors` (`@sleepymug/tau/adaptors`) | The built-in wire adaptors: `dummy`, and `socket`, with its transports | any of the above |
-| `cli` | The `tau` command, which puts the client and its adaptors together | `core`, `client`, `adaptors` |
+| `adaptors` (`@sleepymug/tau/adaptors`) | The dummy adaptor | any of the above |
+| `rpc` (`@sleepymug/tau/rpc`) | The rpc adaptor, its transport, the routes for a backend, and `tau.v1.Runs`, generated | any of the above |
+| `cli` | The `tau` command, which puts the client and its adaptors together | `core`, `client`, `adaptors`, `rpc` |
 
 Neither the client nor the backend SDK knows how files move.
 

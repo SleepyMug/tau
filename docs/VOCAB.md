@@ -57,8 +57,8 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | **client** | What runs a tau where the caller is, the `tau` command or the client SDK: it checks the tau, the call and the paths, and hands the run to a wire adaptor. |
 | **wire adaptor** | The part of the client that talks to one backend, given to it by name: it packages a run, carries it, checks what comes back, and puts the outputs at the targets. |
 | **dummy adaptor** | A wire adaptor built in: a loopback to a **dummy backend** of its own, in the client's process. |
-| **socket adaptor** | A wire adaptor built in: runs on a backend that serves a Unix socket, such as dsh's, each in a session and a container of its own. |
-| **transport** | What carries the socket adaptor's requests to the backend, and their answers back: its socket, a loopback in its process, or another, such as a relay. |
+| **rpc adaptor** | A wire adaptor built in: runs on a backend that serves `tau.v1.Runs` over Connect, such as dsh's, through fleet's gateway, each in a session and a container of its own. |
+| **transport** | What carries the rpc adaptor's calls to the backend, and their answers back: Connect's over a socket, a backend's routes in its process, or another, such as a gateway's. |
 | **backend** | What runs the agent, wherever it is, with the backend SDK. |
 | **backend SDK** | What every backend does alike: **admit** a call, check its files once **placed**, **render** what the agent is given, and **collect** the run's report. |
 | **job** | A run as the client hands it to its adaptor: its envelope, the tau's directory, and the paths of its inputs. |
@@ -89,7 +89,8 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | history, fleet's `history` op and `fleet history` | A run's trace: `tau trace`, and the adaptor's `trace`. |
 | backend, as the client's link; remote service; server SDK | A wire adaptor; a backend; the backend SDK. |
 | API, `apis` in `tau.json`, a package's `tau.apis`; contract, declarations, version, range, implementation, implementation catalog; the tau API, `@sleepymug/tau-api`; `tau api add`, `remove` and `sync`, `.tau/`'s contracts and lock, a source, the provider; contract, as an adaptor's verb | Nothing in the format: what a tau's code needs beyond the tau is the runtime's, such as its commands; the run context, for a run's files and args; the `tau` command, for runs that nest; init's exit codes, as numbers. |
-| fleet adaptor, the fleet service, `$TAU_FLEET_SOCKET` | The socket adaptor, a backend on a Unix socket, `$TAU_SOCKET`. |
+| fleet adaptor, the fleet service, `$TAU_FLEET_SOCKET` | The rpc adaptor, at `$TAU_RPC_SOCKET` and `$TAU_RPC_PATH`. |
+| socket adaptor, its line protocol, `$TAU_SOCKET`, `socketTransport`, `loopbackTransport`, `listenSocket`, `serveConnection`, `readRunRequest` | The rpc adaptor: `tau.v1.Runs`, `rpcTransport`, a router transport, `runsRoutes`, which checks each call. |
 | parcel, a call or a result as JSON with its contents | An envelope or a report, and the paths of a job or a delivery: contents are the adaptor's and the backend's, with the transfer helpers. |
 | cancel | Release, which stops a run that has not ended. |
 | `@sleepymug/tau-dev`: `tau check` type-checking a tau, `tau add`, `tau update`, `tau contract` | The `tau` command, which checks a tau without TypeScript. |

@@ -31,12 +31,18 @@
       "types": "./dist/adaptors/index.d.ts",
       "import": "./dist/adaptors/index.js"
     },
+    "./rpc": {
+      "types": "./dist/rpc/index.d.ts",
+      "import": "./dist/rpc/index.js"
+    },
     "./TAU.md": "./TAU.md",
     "./TAU_DEV.md": "./TAU_DEV.md",
-    "./cli": "./dist/cli/main.js"
+    "./cli": "./dist/cli/main.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
+    "proto",
     "!dist/**/*.test.*",
     "TAU.md",
     "TAU_DEV.md",
@@ -47,6 +53,7 @@
     "access": "public"
   },
   "scripts": {
+    "gen": "node scripts/gen.mjs",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",
@@ -54,10 +61,15 @@
   },
   "packageManager": "pnpm@10.33.2",
   "dependencies": {
+    "@bufbuild/protobuf": "2.17.0",
+    "@connectrpc/connect": "2.3.0",
+    "@connectrpc/connect-node": "2.3.0",
     "ajv": "^8.20.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@bufbuild/buf": "1.75.0",
+    "@bufbuild/protoc-gen-es": "2.17.0",
     "@types/node": "^24.0.0",
     "typescript": "6.0.3"
   }

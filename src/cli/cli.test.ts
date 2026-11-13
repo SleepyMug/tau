@@ -4,12 +4,21 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { createDummyAdaptor } from "../adaptors/dummy.js";
-import { FakeBackend } from "../adaptors/socket-fake.test.util.js";
-import { listenSocket } from "../adaptors/socket-transport.js";
+import { createServer } from "node:http2";
+import { connectNodeAdapter } from "@connectrpc/connect-node";
+import { FakeBackend } from "../rpc/fake-backend.test.util.js";
+import { runsRoutes } from "../rpc/index.js";
 import { type CliContext, main } from "./cli.js";
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), "tau-cli-"));
 after(() => rmSync(tmp, { recursive: true, force: true }));
+
+/** `backend` served on the socket `socket`, below `prefix`, closed after the tests. */
+async function serve(backend: FakeBackend, socket: string, prefix = ""): Promise<void> {
+	const server = createServer(connectNodeAdapter({ routes: runsRoutes(() => backend), ...(prefix === "" ? {} : { requestPathPrefix: prefix }) }));
+	await new Promise<void>((resolve) => server.listen(socket, resolve));
+	after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+}
 
 function write(dir: string, files: Record<string, string>): string {
 	const root = path.join(tmp, dir);
@@ -110,7 +119,7 @@ test("tau status, result and trace look into a run without waiting for it; --tra
 test("a wire adaptor is chosen by name, among those the command is given", async () => {
 	const unknown = await tau(["run", "greet", "--call", "call.json", "--adaptor", "elsewhere"]);
 	assert.equal(unknown.code, 1);
-	assert.equal(unknown.stderr, 'tau: no wire adaptor "elsewhere"; there are dummy, socket\n');
+	assert.equal(unknown.stderr, 'tau: no wire adaptor "elsewhere"; there are dummy, rpc\n');
 	let stdout = "";
 	const context: CliContext = {
 		cwd: home,
@@ -125,33 +134,33 @@ test("a wire adaptor is chosen by name, among those the command is given", async
 	assert.equal(readFileSync(path.join(home, "card.txt"), "utf8"), "Hi.\n");
 });
 
-test("tau run --adaptor socket runs on the backend at $TAU_SOCKET, telling it the working directory", async () => {
+test("tau run --adaptor rpc runs on the backend at $TAU_RPC_SOCKET, below $TAU_RPC_PATH, telling it the working directory", async () => {
 	const backend = new FakeBackend(async (placed) => (writeFileSync(placed.places.card as string, "From the backend.\n"), { ok: true, text: "Sent." }));
 	const socket = path.join(tmp, "backend.sock");
-	after(await listenSocket(socket, backend.handle));
+	await serve(backend, socket, "/services/tau");
 	let stdout = "";
 	const context: CliContext = {
 		cwd: home,
-		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(tmp, "no-config.yaml"), TAU_SOCKET: socket },
+		env: { TAU_STATE_DIR: path.join(tmp, "state"), TAU_CONFIG: path.join(tmp, "no-config.yaml"), TAU_RPC_SOCKET: socket, TAU_RPC_PATH: "/services/tau" },
 		stdin: (async function* () {})(),
 		stdout: (text) => void (stdout += text),
 		stderr: () => {},
 	};
-	assert.equal(await main(["run", "greet", "--call", "call.json", "--adaptor", "socket"], context), 0);
+	assert.equal(await main(["run", "greet", "--call", "call.json", "--adaptor", "rpc"], context), 0);
 	assert.equal(stdout, "Sent.\n");
 	assert.equal(readFileSync(path.join(home, "card.txt"), "utf8"), "From the backend.\n");
-	assert.deepEqual(backend.submitted, [{ op: "submit", title: "greet", project: home }]);
+	assert.deepEqual(backend.submitted, [{ title: "greet", project: home }]);
 	assert.equal(backend.released.length, 1);
 	let stderr = "";
-	assert.equal(await main(["run", "greet", "--call", "call.json", "--adaptor", "socket"], { ...context, env: { ...context.env, TAU_SOCKET: undefined }, stderr: (text) => void (stderr += text) }), 1);
-	assert.equal(stderr, "tau: the socket adaptor has no socket: set $TAU_SOCKET, or adaptors.socket.path in the config\n");
+	assert.equal(await main(["run", "greet", "--call", "call.json", "--adaptor", "rpc"], { ...context, env: { ...context.env, TAU_RPC_SOCKET: undefined }, stderr: (text) => void (stderr += text) }), 1);
+	assert.equal(stderr, "tau: the rpc adaptor has no backend: set $TAU_RPC_SOCKET, or adaptors.rpc.socket in the config\n");
 });
 
-test("the config file chooses the adaptor, and the backend's socket, a path relative to its folder; the command line and the environment come first", async () => {
+test("the config file chooses the adaptor, and the backend's socket, a path relative to its folder, and its calls' path; the command line and the environment come first", async () => {
 	const backend = new FakeBackend(async (placed) => (writeFileSync(placed.places.card as string, "Configured.\n"), { ok: true, text: "Sent." }));
-	const configDir = write("config", { "config.yaml": "# Runs go to the backend.\nadaptor: socket\nadaptors:\n  socket:\n    path: sockets/tau.sock\n" });
+	const configDir = write("config", { "config.yaml": "# Runs go to the backend.\nadaptor: rpc\nadaptors:\n  rpc:\n    socket: sockets/tau.sock\n    path: /services/tau\n" });
 	mkdirSync(path.join(configDir, "sockets"));
-	after(await listenSocket(path.join(configDir, "sockets", "tau.sock"), backend.handle));
+	await serve(backend, path.join(configDir, "sockets", "tau.sock"), "/services/tau");
 	const run = async (env: CliContext["env"], argv: readonly string[] = []): Promise<number> =>
 		main(["run", "greet", "--call", "call.json", ...argv], {
 			cwd: home,
@@ -167,18 +176,19 @@ test("the config file chooses the adaptor, and the backend's socket, a path rela
 	assert.equal(await run({}, ["--adaptor", "dummy"]), 0);
 	assert.equal(await run({ TAU_ADAPTOR: "dummy" }), 0);
 	assert.equal(backend.submitted.length, 1);
-	// $TAU_SOCKET before the config's socket.
-	assert.equal(await run({ TAU_SOCKET: path.join(tmp, "nothing.sock") }), 1);
+	// $TAU_RPC_SOCKET before the config's socket.
+	assert.equal(await run({ TAU_RPC_SOCKET: path.join(tmp, "nothing.sock") }), 1);
 	assert.equal(backend.submitted.length, 1);
 });
 
 test("a config file that is not one fails the command, saying where and why", async () => {
 	const cases: [string, RegExp][] = [
-		["adaptor: socket\npath: x\n", /config\.yaml: it has no "path"; it has adaptor, adaptors\n$/u],
-		["adaptors:\n  dummy: {}\n", /config\.yaml: adaptors has no "dummy"; it has socket\n$/u],
-		["adaptors:\n  socket: { path: 3 }\n", /config\.yaml: adaptors\.socket\.path is not a path\n$/u],
-		["adaptor: [socket]\n", /config\.yaml: adaptor is not a name\n$/u],
-		["- socket\n", /config\.yaml: it is not a mapping\n$/u],
+		["adaptor: rpc\npath: x\n", /config\.yaml: it has no "path"; it has adaptor, adaptors\n$/u],
+		["adaptors:\n  dummy: {}\n", /config\.yaml: adaptors has no "dummy"; it has rpc\n$/u],
+		["adaptors:\n  rpc: { socket: 3 }\n", /config\.yaml: adaptors\.rpc\.socket is not a path\n$/u],
+		["adaptors:\n  rpc: { socket: s.sock, path: services/tau }\n", /config\.yaml: adaptors\.rpc\.path is not a path from the root, such as \/services\/tau\n$/u],
+		["adaptor: [rpc]\n", /config\.yaml: adaptor is not a name\n$/u],
+		["- rpc\n", /config\.yaml: it is not a mapping\n$/u],
 		["adaptor: : :\n", /config\.yaml: /u],
 	];
 	for (const [text, expected] of cases) {
@@ -218,7 +228,7 @@ test("a config file is found in $XDG_CONFIG_HOME, and an empty one says nothing"
 		stdout: () => {},
 		stderr: (text) => void (stderr += text),
 	}), 1);
-	assert.equal(stderr, 'tau: no wire adaptor "elsewhere"; there are dummy, socket\n');
+	assert.equal(stderr, 'tau: no wire adaptor "elsewhere"; there are dummy, rpc\n');
 });
 
 test("a command line that is not one gives the usage", async () => {
