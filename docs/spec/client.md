@@ -25,9 +25,9 @@ await client.release(run);                                              // … a
 ```
 
 - `load(dir)` reads and checks the tau at `dir`, as [Directory](directory.md),
-  [Metadata](metadata.md), [Placeholders](placeholders.md) and [Packages](packages.md) have it,
-  and gives its `description`, `files`, `args`, `exposed`, `skills` and `init`. It reads nothing
-  of `.tau/`, loads no TypeScript, and checks none of the packages' code, which is their authors'.
+  [Metadata](metadata.md) and [Placeholders](placeholders.md) have it, and gives its
+  `description`, `files`, `args`, `skills` and `init`. It reads nothing of `.tau/`, and loads no
+  TypeScript.
 - `check(dir, call, cwd)` reads the tau, resolves `call` against it, its paths against `cwd`, and
   checks the args against the schema and their placeholders (see [Calls](calls.md)), and the
   caller's paths, as a run's are when it starts (see [Paths](paths.md)), without starting it.

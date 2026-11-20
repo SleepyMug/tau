@@ -34,6 +34,7 @@ const TAU = write("tau", {
 			extras: { mode: "in", description: "Anything else to read." },
 		},
 		args: { type: "object", properties: { tone: { type: "string", description: "How it reads." } }, required: ["tone"] },
+		exclude: ["tests"],
 	}),
 	"skills/edit/SKILL.md": "Edit.\n",
 });
@@ -80,6 +81,7 @@ test("a run goes from the caller's paths, through a wire adaptor, to a backend, 
 	// The client hands over the call without the caller's paths, each input with the kind of what is at its path.
 	const [job] = jobs as [Job];
 	assert.equal(job.tau, TAU);
+	assert.deepEqual(job.exclude, ["tests"]);
 	assert.deepEqual(job.envelope, {
 		files: {
 			site: { mode: "inout", base: "site", kind: "dir" },

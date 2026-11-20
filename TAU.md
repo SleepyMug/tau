@@ -1,7 +1,6 @@
 # TAU (Transportable Agent Unit)
 
-A **TAU** is an agent packaged as a directory: a prompt, the files and args it takes, and code of its
-own its programs build on. A **runtime** runs one for a **caller**, a person, a program or another agent:
+A **TAU** is an agent packaged as a directory: a prompt, and the files and args it takes. A **runtime** runs one for a **caller**, a person, a program or another agent:
 the TAU's **agent**, a model, does the task its prompt sets, with what the caller gives it. This
 says what a TAU takes and what a run of one promises; TAU_DEV.md says how to make one.
 

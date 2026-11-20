@@ -232,7 +232,6 @@ function describe(dir: string): object {
 		...(tau.description === undefined ? {} : { description: tau.description }),
 		files: tau.files,
 		...(tau.args === undefined ? {} : { args: tau.args }),
-		exposes: tau.exposed.map(({ specifier }) => specifier),
 		skills: tau.skills.map(({ name }) => name),
 		...(tau.init === undefined ? {} : { init: tau.init }),
 	};

@@ -9,6 +9,9 @@ gives it, or a copy. The tau's own directory is in the view too, whole, where `$
 directory, each place, and the tau's directory are, is up to the runtime. Init and the agent's
 programs find each place, and the args, in the run's context (see [The run context](context.md)).
 
+Init and the agent run **programs** with `node`, Node.js 24 or later: JavaScript, or TypeScript that
+Node.js runs as is, stripping its types.
+
 What the agent writes anywhere but at its files' places is scratch (see [Results](results.md)).
 A tau needs nothing of its caller's but its call, so a runtime can run it wherever it can give it
 its files, inside another run included. What else the agent reaches is up to the runtime too:
@@ -19,8 +22,9 @@ its files, inside another run included. What else the agent reaches is up to the
   files and what the runtime gives it, such as its commands, and the runtime may hold it to each
   file's mode, giving an `in` read-only.
 
-What the agent does through what the runtime gives it, such as a command that reaches a service,
-takes effect when done, and stays if the run fails.
+A runtime says what it gives the agent, such as the commands it puts on the `PATH`, to the model.
+What the agent does through it, such as a command that reaches a service, takes effect when done,
+and stays if the run fails.
 
 ## Runs that nest
 

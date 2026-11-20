@@ -23,6 +23,5 @@ export {
 	TAU_SKIP,
 	type Trace,
 } from "./model.js";
-export { type Exposed } from "./packages.js";
 export { checkInputs, checkOutputs, checkPlaced, kindAt } from "./paths.js";
 export { type Expanded, loadTau, type Skill, type Tau } from "./tau.js";

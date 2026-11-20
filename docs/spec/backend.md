@@ -14,7 +14,7 @@ const admitted = sdk.admit(envelope, `${work}/tau`);            // or refuse, be
 const places = placesUnder(`${work}/files`, admitted.envelope);
 // … each `in` and `inout` file's content goes to its place, as it comes …
 const placed = admitted.place(places);
-const rendered = placed.render();        // prompt, args, init, context, skills, exposed
+const rendered = placed.render();        // prompt, args, init, context, skills
 // … run init, and decide by initDecision(code); run the agent on rendered.prompt …
 const { report, sources } = placed.collect({ ok, text, failure });   // send these back
 ```
@@ -35,8 +35,7 @@ const { report, sources } = placed.collect({ ok, text, failure });   // send the
   [Placeholders](placeholders.md)): the `prompt`; the `args`; `init`, each placeholder one word for
   `sh`; `context`, the run's context, `self`, the place of each file, `files`, and the `args`,
   which the backend writes where `TAU_CONTEXT` names it (see [The run context](context.md)); and
-  the tau's `skills`, and what it `exposed`, for the backend to present to the model as
-  [Runtimes](runtimes.md) has it.
+  the tau's `skills`, for the backend to present to the model.
 - **Init.** `initDecision(code)` says what init's exit code means (see [Init](init.md)): `skip`,
   `run` or `fallback`, which an ending without a code, such as by a signal, is too.
 - **Collect.** `placed.collect(outcome)` gives the run's `report`, and the place of each output it
@@ -47,7 +46,7 @@ const { report, sources } = placed.collect({ ok, text, failure });   // send the
   again (see [Protocol](protocol.md#a-runs-life)).
 
 What the backend SDK does not do is the backend's: carry calls and results, choose where a run
-works, move its files, give the agent its program directory and its run's context, run init and
-the agent, present skills and packages to the model, keep each run's status, its result,
+works, move its files, give the agent its run's context, run init and the agent, present skills
+to the model, keep each run's status, its result,
 numbered, and its trace until it is released (see [Protocol](protocol.md#a-runs-life)), and stop a
 run released before it ended.

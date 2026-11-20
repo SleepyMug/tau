@@ -1,7 +1,6 @@
 import path from "node:path";
 import { readEnvelope } from "../core/forms.js";
 import { type CallFile, type Envelope, type Json, type Outcome, type Output, type Report, TAU_RUN, TAU_SKIP } from "../core/model.js";
-import type { Exposed } from "../core/packages.js";
 import { checkOutputs, checkPlaced, kindAt } from "../core/paths.js";
 import { type Expanded, loadTau, type Skill, type Tau } from "../core/tau.js";
 import { messageOf } from "../core/util.js";
@@ -71,7 +70,6 @@ export interface Rendered extends Expanded {
 	/** Where the agent sees the tau's own directory. */
 	readonly self: string;
 	readonly skills: readonly Skill[];
-	readonly exposed: readonly Exposed[];
 }
 
 export interface BackendSdk {
@@ -114,7 +112,7 @@ function placed(tau: Tau, envelope: Envelope, places: { readonly [name: string]:
 		places,
 		render(self = tau.dir) {
 			const expanded = tau.expand(envelope, places, self);
-			return { ...expanded, context: { self, files: places, args: expanded.args }, self, skills: tau.skills, exposed: tau.exposed };
+			return { ...expanded, context: { self, files: places, args: expanded.args }, self, skills: tau.skills };
 		},
 		collect(outcome) {
 			let result: Outcome = outcome.ok ? { ok: true, text: outcome.text } : outcome;

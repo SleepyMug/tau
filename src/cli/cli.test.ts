@@ -65,7 +65,6 @@ test("tau check and tau describe read a tau, and check a call of it, without run
 		description: "Write a greeting card.",
 		files: { card: { kind: "file", mode: "out", description: "The card." } },
 		args: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
-		exposes: [],
 		skills: [],
 	});
 });

@@ -6,10 +6,10 @@ holds:
 ```
 plan-trip/
 ├── PROMPT.md                   the prompt, the only file required
-├── tau.json                    its files and args, what its programs import, and its init
+├── tau.json                    its files and args, and its init
 ├── init.mts                    run first: writes the itinerary itself if the trip is booked
 ├── skills/visas/SKILL.md       a skill the agent can use
-├── node_modules/trip-days/     a package of its own, which its programs import
+├── tests/                      its author's, which tau.json excludes
 └── .tau/                       its author's tools', never carried
 ```
 
@@ -17,8 +17,8 @@ plan-trip/
 
 ```json
 {
-  "exposes": ["trip-days"],
-  "init": "node ${self}/init.mts"
+  "init": "node ${self}/init.mts",
+  "exclude": ["tests"]
 }
 ```
 
@@ -26,19 +26,18 @@ plan-trip/
 
 ```
 Plan a trip through ${cities} for ${travelers}, keeping to ${wishes}, from the bookings in ${trip},
-and write the plan, day by day, to ${itinerary}, with trip-days.
+and write the plan, day by day, to ${itinerary}.
 ```
 
 `init.mts`:
 
 ```ts
-import { readFileSync, writeFileSync } from "node:fs";
-import { planDays, readBookings } from "trip-days";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const { files } = JSON.parse(readFileSync(process.env.TAU_CONTEXT as string, "utf8"));
-const bookings = readBookings(files.trip);
+const bookings = readdirSync(files.trip).filter((name) => name.endsWith(".pdf")).sort();
 if (bookings.length === 0) process.exit(100); // TAU_RUN: nothing booked yet, so the agent plans the trip
-writeFileSync(files.itinerary, planDays(bookings));
+writeFileSync(files.itinerary, bookings.map((booking, day) => `Day ${day + 1}: ${booking}\n`).join(""));
 // Ending normally exits 0, TAU_SKIP: the agent does not run, and this is the run's final text.
 console.log(`The trip was booked already; wrote its itinerary, from ${bookings.length} bookings.`);
 ```
@@ -46,16 +45,16 @@ console.log(`The trip was booked already; wrote its itinerary, from ${bookings.l
 - **The prompt** names the files and the args by placeholders, as the args do (TAU.md), and
   `${self}` names the TAU's own directory, which the agent reads but does not change. It names no
   extra file, which the TAU cannot know of.
-- **Programs**: the agent runs programs with `node`, Node.js 24 or later, as JavaScript, or as
-  TypeScript Node.js runs as is, its types stripped, from a program directory its runtime gives
-  it, where they import the TAU's packages by name, as its own code does. `node_modules/` holds
-  them, as installed, each self-contained, with declarations of what programs import; `exposes`
-  names those the runtime presents to the model.
+- **Programs**, init's and the agent's, run with `node`, Node.js 24 or later: JavaScript, or
+  TypeScript that Node.js runs as is, its types stripped.
 - **The run context**: init and the agent's programs read `TAU_CONTEXT`, a JSON file, `{ self,
   files, args }`: the TAU's directory, the place of each file, extra files included, by its name,
   and the args, their placeholders expanded.
 - **What else it needs** is its runtime's: a command, a service, the network. The TAU says so in
   its prompt, and runs only where it is there.
+- **exclude**, optional, lists what of the directory does not go with a call: paths relative to it,
+  or globs of them, such as `tests` or `**/*.draft.md`, but none of what a runtime reads. `.tau/`
+  never goes.
 - **A skill** is `skills/<name>/SKILL.md`, which starts with YAML frontmatter giving its `name`, its
   directory's, and its `description`, by which the agent tells when to use it.
 - **init**, optional, is a command the runtime runs before the agent, in the agent's working

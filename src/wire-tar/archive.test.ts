@@ -219,13 +219,19 @@ test("a job packs into a call, which unpacks where the backend says, once it adm
 	writeFileSync(path.join(home, "site", "index.html"), "<p>hi</p>\n");
 	writeFileSync(path.join(home, "notes.txt"), "notes\n");
 	const tau = path.join(tmp, "pack-tau");
-	mkdirSync(tau);
+	mkdirSync(path.join(tau, "tests"), { recursive: true });
 	writeFileSync(path.join(tau, "PROMPT.md"), "Go.\n");
+	// What goes with the call is the tau's directory, less `.tau/` and what its `exclude` leaves out.
+	writeFileSync(path.join(tau, "init.mjs"), "");
+	writeFileSync(path.join(tau, "plan.draft.md"), "");
+	writeFileSync(path.join(tau, "tests", "init.test.mjs"), "");
+	mkdirSync(path.join(tau, ".tau"));
+	writeFileSync(path.join(tau, ".tau", "notes.md"), "");
 	const envelope: Envelope = {
 		files: { notes: { mode: "in", kind: "file", base: "notes.txt" }, site: { mode: "inout", kind: "dir", base: "site" }, counts: { mode: "out", base: "counts.txt" } },
 		args: {},
 	};
-	const job = { envelope, tau, inputs: { notes: path.join(home, "notes.txt"), site: path.join(home, "site") } };
+	const job = { envelope, tau, exclude: ["tests", "**/*.draft.md"], inputs: { notes: path.join(home, "notes.txt"), site: path.join(home, "site") } };
 
 	const work = path.join(tmp, "pack-work");
 	const seen: string[] = [];
@@ -241,6 +247,7 @@ test("a job packs into a call, which unpacks where the backend says, once it adm
 	});
 	assert.deepEqual(unpacked, envelope);
 	assert.deepEqual(seen, ["Go.\n", "tau"]);
+	assert.deepEqual(readdirSync(path.join(work, "tau")).sort(), ["PROMPT.md", "init.mjs"]);
 	assert.equal(readFileSync(places.notes, "utf8"), "notes\n");
 	assert.deepEqual(tree(places.site), tree(path.join(home, "site")));
 	assert.deepEqual(readdirSync(path.join(work, "out")), []);

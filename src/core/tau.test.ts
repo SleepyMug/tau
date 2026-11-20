@@ -286,7 +286,7 @@ test("a call may give extra files, each with its mode, which the args name, and 
 
 test("a tau without tau.json takes no files and no args", () => {
 	const tau = loadTau(write("plain", { "PROMPT.md": "Say hi. Costs $1, and $${x} stays as it is." }));
-	assert.deepEqual([tau.description, tau.files, tau.args, tau.exposed, tau.init], [undefined, {}, undefined, [], undefined]);
+	assert.deepEqual([tau.description, tau.files, tau.args, tau.init], [undefined, {}, undefined, undefined]);
 	const empty = { files: {}, paths: {}, args: {} };
 	assert.deepEqual(tau.resolve({}, cwd), empty);
 	assert.deepEqual(tau.resolve({ files: {}, args: {} }, cwd), empty);
@@ -341,9 +341,6 @@ test("tau.json outside the spec is refused, naming the file and the reason", () 
 		["keyword", { args: { ...object, properties: { a: { type: "string", widget: "box" } } } }, /`args` is not a JSON Schema the spec takes: strict mode: unknown keyword: "widget"/],
 		["meta", { args: { ...object, required: "a" } }, /`args` is not a JSON Schema the spec takes: schema is invalid: data\/required must be array/],
 		["ref", { args: { ...object, properties: { a: { $ref: "https://example.com/a.json" } } } }, /`args` is not a JSON Schema the spec takes: can't resolve reference https:\/\/example\.com\/a\.json/],
-		["exposes", { exposes: "notes-kit" }, /`exposes` must be an array/],
-		["exposesname", { exposes: ["notes-kit/sub"] }, /`exposes`: "notes-kit\/sub" is not a package's name/],
-		["exposestwice", { exposes: ["@acme/notes", "@acme/notes"] }, /`exposes` lists @acme\/notes twice/],
 		["init", { init: ["node", "init.ts"] }, /`init` must be a command, a string that is not blank/],
 		["initblank", { init: " " }, /`init` must be a command/],
 	];

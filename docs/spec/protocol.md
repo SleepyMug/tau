@@ -21,9 +21,8 @@ tau runs agents as a service. The **runtime** this spec speaks of is two parts, 
 
 What a runtime must do, the side that does it does: the client checks a call and its paths (see
 [Calls](calls.md) and [Paths](paths.md)) before the run goes anywhere, and its adaptor puts the
-outputs (see [Results](results.md)); the backend chooses the places, gives the agent the tau's
-packages and the run's context (see [Runtimes](runtimes.md) and [The run context](context.md)),
-runs init and the agent (see
+outputs (see [Results](results.md)); the backend chooses the places, gives the agent the run's
+context (see [The run context](context.md)), runs init and the agent (see
 [Init](init.md) and [Running](running.md)), and checks what the agent left.
 
 ## What is modelled
@@ -51,8 +50,9 @@ so that they can do it as well as they know how.
   ```
 
 - **The job**: what the client hands its adaptor: the envelope; the tau's directory, which always
-  goes with the call, all of it but `.tau/` (see [Directory](directory.md)); and the caller's path
-  of each `in` and `inout` file, or, for an `in`, its paths.
+  goes with the call, all of it but `.tau/` and what `tau.json`'s `exclude` leaves out, whose
+  patterns the job carries (see [Directory](directory.md)); and the caller's path of each `in` and
+  `inout` file, or, for an `in`, its paths.
 - **The delivery**: where the client asks its adaptor to put a run's outputs: the envelope's
   files, and the caller's path of each `out` and `inout` file, its **target**.
 - **The report**: how a run ended, and what it gives back: `ok`, whether it succeeded; `text`, the
@@ -182,8 +182,8 @@ Neither the client nor the backend SDK knows how files move.
 
 ## Open
 
-- Declaring what a tau needs of its runtime beyond the format, such as the modules its packages
-  import, or the commands its prompt runs, so that a client can check it before it submits a run.
+- Declaring what a tau needs of its runtime beyond the format, such as the commands its prompt
+  runs, so that a client can check it before it submits a run.
 - Asking a run's agent to improve its result, after which its status gives the new one's number,
   and its result the new one; and asking for a result by its number.
 - A trace that streams, as the run goes on, rather than given whole.

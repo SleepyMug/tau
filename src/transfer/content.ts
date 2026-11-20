@@ -2,6 +2,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { chmod, lstat, mkdir, readdir, readlink, symlink } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+import { excluder } from "../core/exclude.js";
 import type { Job, Kind } from "../core/model.js";
 import { kindAt } from "../core/paths.js";
 
@@ -48,8 +49,8 @@ export interface Content {
 export interface ContentSource {
 	readonly file?: string;
 	readonly from: string | readonly string[];
-	/** What a directory at `from` holds that its content leaves out, by name. */
-	readonly leave?: readonly string[];
+	/** What a directory at `from` holds that its content leaves out, given its path in the content, `/`-separated. */
+	readonly leave?: (path: string) => boolean;
 }
 
 /** More links in a row than this is a loop, as Linux has it. */
@@ -62,14 +63,14 @@ const NOTHING: AsyncIterable<Uint8Array> = { [Symbol.asyncIterator]: async funct
  * a directory's in order of name, each with its permission bits, and its symlinks as they are.
  */
 export async function* readContents(sources: readonly ContentSource[]): AsyncGenerator<Content> {
-	for (const { file, from, leave = [] } of sources) {
+	for (const { file, from, leave = () => false } of sources) {
 		const entries = typeof from === "string" ? walkSource(from, leave) : walkSources(from);
 		yield { ...(file === undefined ? {} : { file }), kind: typeof from === "string" ? kindAt(from) : "dir", entries };
 	}
 }
 
 /** The entries of `source`, which is not a symlink. */
-async function* walkSource(source: string, leave: readonly string[]): AsyncGenerator<ContentEntry> {
+async function* walkSource(source: string, leave: (path: string) => boolean): AsyncGenerator<ContentEntry> {
 	if ((await lstat(source)).isSymbolicLink()) throw new Error(`${source} is a symlink, which a content is not`);
 	yield* walk(source, "", leave);
 }
@@ -84,25 +85,29 @@ async function* walkSources(sources: readonly string[]): AsyncGenerator<ContentE
 	}
 }
 
-/** The entries of `file`, at `at` in its content, and of all a directory holds, in order of name, but what it holds named in `leave`. */
-async function* walk(file: string, at: string, leave: readonly string[] = []): AsyncGenerator<ContentEntry> {
+/** The entries of `file`, at `at` in its content, and of all a directory holds, in order of name, but what `leave` leaves out, and all it holds. */
+async function* walk(file: string, at: string, leave: (path: string) => boolean = () => false): AsyncGenerator<ContentEntry> {
 	const stats = await lstat(file);
 	const mode = stats.mode & 0o777;
 	if (stats.isSymbolicLink()) yield { path: at, type: "symlink", mode, size: 0, target: await readlink(file), body: NOTHING };
 	else if (stats.isFile()) yield { path: at, type: "file", mode, size: stats.size, body: { [Symbol.asyncIterator]: () => createReadStream(file)[Symbol.asyncIterator]() } };
 	else if (stats.isDirectory()) {
 		yield { path: at, type: "dir", mode, size: 0, body: NOTHING };
-		for (const entry of (await readdir(file)).sort()) if (!leave.includes(entry)) yield* walk(path.join(file, entry), at === "" ? entry : `${at}/${entry}`);
+		for (const entry of (await readdir(file)).sort()) {
+			const inner = at === "" ? entry : `${at}/${entry}`;
+			if (!leave(inner)) yield* walk(path.join(file, entry), inner, leave);
+		}
 	} else throw new Error(`${file} is neither a file, a directory nor a symlink, which a content holds`);
 }
 
 /**
- * A job's contents: the tau's, but its `.tau/`, which no client carries (docs/spec/directory.md),
- * then each `in` and `inout` file's, in the envelope's order, each read as it is read.
+ * A job's contents: the tau's, but its `.tau/` and what its `exclude` leaves out, which no client
+ * carries (docs/spec/directory.md), then each `in` and `inout` file's, in the envelope's order, each
+ * read as it is read.
  */
 export function jobContents(job: Job): AsyncGenerator<Content> {
 	const files = Object.keys(job.envelope.files).filter((name) => Object.hasOwn(job.inputs, name));
-	return readContents([{ from: job.tau, leave: [".tau"] }, ...files.map((file) => ({ file, from: job.inputs[file] as string | readonly string[] }))]);
+	return readContents([{ from: job.tau, leave: excluder(job.exclude) }, ...files.map((file) => ({ file, from: job.inputs[file] as string | readonly string[] }))]);
 }
 
 /**

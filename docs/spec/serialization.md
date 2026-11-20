@@ -64,8 +64,8 @@ Compressing the archive, as a whole, is up to whatever carries it.
   content in the archive, at `files/<name>`; an `out` has none, since what its place holds at
   first is not specified.
 - `args` are the call's args, as the caller gave them, their placeholders not yet expanded.
-- The tau is the directory at `tau/`, as [Directory](directory.md) has it, without its `.tau/`, and
-  whose symlinks lead inside it. It comes first, so that the backend can read the tau, and check the
+- The tau is the directory at `tau/`, as [Directory](directory.md) has it, without its `.tau/` and
+  what its `exclude` leaves out, and whose symlinks lead inside it. It comes first, so that the backend can read the tau, and check the
   call against it, before it reads the files.
 
 Every content in the archive is a file's that `files` names with content, or the tau's.

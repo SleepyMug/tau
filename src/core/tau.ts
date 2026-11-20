@@ -1,9 +1,9 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { checkEnvelope, type Declared, resolveCall, scopeOfCall } from "./call.js";
-import { linkProblems } from "./links.js";
+import { excluder } from "./exclude.js";
+import { excludedProblems, linkProblems } from "./links.js";
 import { readMetadata } from "./metadata.js";
-import { type Exposed, readExposed } from "./packages.js";
 import { type Envelope, type FileDeclaration, type Json, type ResolvedCall, SELF } from "./model.js";
 import { expand, expansion, parseTemplate, placeholderProblem, scopeOf, shellWord, type Template } from "./placeholders.js";
 import { isObject, messageOf } from "./util.js";
@@ -15,7 +15,7 @@ export interface Skill {
 	readonly dir: string;
 }
 
-/** A tau, read and checked: `PROMPT.md`, `tau.json`, what it exposes, and its skills. */
+/** A tau, read and checked: `PROMPT.md`, `tau.json`, and its skills. */
 export interface Tau {
 	readonly dir: string;
 	/** What the tau does, for whoever runs it. */
@@ -26,8 +26,6 @@ export interface Tau {
 	readonly files: { readonly [name: string]: FileDeclaration };
 	/** The schema of the args, a JSON Schema (draft 2020-12) of an object; undefined when the tau takes none. */
 	readonly args: { readonly [keyword: string]: Json } | undefined;
-	/** The packages of its own the runtime presents to the model, in the order tau.json's `exposes` lists them; none without the list. */
-	readonly exposed: readonly Exposed[];
 	/** Each directory in `skills/` that holds a `SKILL.md`, in the order of their names. */
 	readonly skills: readonly Skill[];
 	/**
@@ -35,6 +33,8 @@ export interface Tau {
 	 * without it (docs/spec/init.md), as tau.json gives it; undefined without one. `expand` expands it.
 	 */
 	readonly init: string | undefined;
+	/** The patterns of what of its directory does not go with a call, beside `.tau/`, as tau.json gives them. */
+	readonly exclude: readonly string[];
 	/**
 	 * The client's side of a run: `call`, as a caller gives it (docs/spec/calls.md), checked against
 	 * the tau, each path resolved against `cwd`. Throws TypeError, listing every problem.
@@ -69,9 +69,8 @@ export interface Expanded {
 /**
  * The tau at `dir`: its PROMPT.md, and its tau.json if it has one (without it, the tau takes no
  * files and no args). Throws, naming the file and the reason, when tau.json breaks the spec or the
- * prompt names what it cannot, and, listing every one, for a symlink that breaks the spec in what a
- * runtime reads, node_modules/ included, and then for what the tau exposes that it lacks. It
- * type-checks none of its packages, and loads no TypeScript.
+ * prompt names what it cannot, and, listing every one, for what a runtime reads that `exclude`
+ * leaves out, and for a symlink that breaks the spec in it. It loads no TypeScript.
  */
 export function loadTau(dir: string): Tau {
 	const absolute = path.resolve(dir);
@@ -79,7 +78,7 @@ export function loadTau(dir: string): Tau {
 	if (!existsSync(promptFile)) throw new Error(`${absolute}: not a tau (no PROMPT.md)`);
 	const metadataFile = path.join(absolute, "tau.json");
 	const metadata = existsSync(metadataFile) ? readMetadata(metadataFile) : undefined;
-	const { description, files = {}, args, validate, exposes, init } = metadata ?? {};
+	const { description, files = {}, args, validate, init, exclude = [] } = metadata ?? {};
 	const declared: Declared = {
 		files,
 		declaredArgs: new Set(Object.keys(isObject(args?.properties) ? args.properties : {})),
@@ -102,10 +101,8 @@ export function loadTau(dir: string): Tau {
 	} catch (error) {
 		throw new Error(`${metadataFile}: ${messageOf(error)}`);
 	}
-	const problems = linkProblems(absolute);
-	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
-	const root = realpathSync(absolute);
-	const exposed = readExposed(root, exposes, problems);
+	const excluded = excluder(exclude);
+	const problems = [...excludedProblems(absolute, excluded), ...linkProblems(absolute, excluded)];
 	if (problems.length > 0) throw new Error(`${absolute}: breaks the spec:\n  ${problems.join("\n  ")}`);
 
 	return {
@@ -114,9 +111,9 @@ export function loadTau(dir: string): Tau {
 		prompt,
 		files,
 		args,
-		exposed,
 		skills: readSkills(absolute),
 		init,
+		exclude,
 		resolve: (call, cwd) => resolveCall(declared, call, cwd),
 		check: (envelope) => checkEnvelope(declared, envelope),
 		expand(call, places, self = absolute) {

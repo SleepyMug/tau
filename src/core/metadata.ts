@@ -10,12 +10,10 @@ export interface Metadata {
 	readonly args: { readonly [keyword: string]: Json } | undefined;
 	/** What checks args against `args`; undefined when the tau takes none. */
 	readonly validate: ValidateFunction | undefined;
-	readonly exposes: readonly string[] | undefined;
 	readonly init: string | undefined;
+	/** The patterns of what of the tau's directory does not go with a call; none without them. */
+	readonly exclude: readonly string[];
 }
-
-/** What `exposes` lists: a package's name, scoped or not, as programs import it. */
-const PACKAGE = /^(?:@[A-Za-z0-9][A-Za-z0-9._~-]*\/)?[A-Za-z0-9][A-Za-z0-9._~-]*$/u;
 
 /** The tau.json at `file`. Throws, naming the file and the reason, when it breaks the spec. */
 export function readMetadata(file: string): Metadata {
@@ -27,14 +25,15 @@ export function readMetadata(file: string): Metadata {
 			throw new TypeError(`is not JSON: ${messageOf(error)}`);
 		}
 		if (!isObject(json)) throw new TypeError("must be an object");
-		const { description, files = {}, args, exposes, init, ...rest } = json;
+		const { description, files = {}, args, init, exclude = [], ...rest } = json;
 		refuseKeys(rest, "tau.json");
 		if (description !== undefined && typeof description !== "string")
 			throw new TypeError("`description` must be a string");
 		if (!isObject(files)) throw new TypeError("`files` must be an object, from each file's name to what it is");
-		if (exposes !== undefined && !Array.isArray(exposes)) throw new TypeError("`exposes` must be an array");
 		if (init !== undefined && (typeof init !== "string" || init.trim() === ""))
 			throw new TypeError("`init` must be a command, a string that is not blank");
+		if (!Array.isArray(exclude) || exclude.some((pattern) => typeof pattern !== "string" || pattern.trim() === "" || pattern.startsWith("/")))
+			throw new TypeError("`exclude` must be an array of patterns, each a relative path or glob that is not blank");
 
 		const declared: { [name: string]: FileDeclaration } = {};
 		for (const [name, value] of Object.entries(files)) {
@@ -43,21 +42,13 @@ export function readMetadata(file: string): Metadata {
 		}
 		const validate = args === undefined ? undefined : readSchema(args, declared);
 
-		const exposed = new Set<string>();
-		for (const specifier of exposes ?? []) {
-			if (typeof specifier !== "string" || !PACKAGE.test(specifier))
-				throw new TypeError(`\`exposes\`: ${JSON.stringify(specifier)} is not a package's name`);
-			if (exposed.has(specifier)) throw new TypeError(`\`exposes\` lists ${specifier} twice`);
-			exposed.add(specifier);
-		}
-
 		return {
 			description,
 			files: declared,
 			args: args as { [keyword: string]: Json } | undefined,
 			validate,
-			exposes: exposes === undefined ? undefined : [...exposed],
 			init,
+			exclude: exclude as string[],
 		};
 	} catch (error) {
 		throw new Error(`${file}: ${messageOf(error)}`);

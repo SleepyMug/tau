@@ -1,7 +1,7 @@
 # Metadata
 
-`tau.json` declares what a tau takes from its caller, its files and its args, what its programs
-import, and its init. Without it, a tau takes no files and no args.
+`tau.json` declares what a tau takes from its caller, its files and its args, its init, and what
+of its directory does not go with a call. Without it, a tau takes no files and no args.
 
 ```json
 {
@@ -29,7 +29,8 @@ import, and its init. Without it, a tau takes no files and no args.
     },
     "required": ["edits"]
   },
-  "exposes": ["file-edits"]
+  "init": "node ${self}/init.mts",
+  "exclude": ["tests", "**/*.draft.md"]
 }
 ```
 
@@ -40,11 +41,12 @@ Each key is optional, and any other is refused:
   name to what it is (see [Files](#files)). A call gives a path for every one, and may give
   others, with their modes (see [Calls](calls.md)).
 - **`args`** is the **schema** of the args (see [Args](#args)).
-- **`exposes`** names the packages of the tau's own that the agent's programs import, each once,
-  by the name they import it as, for a runtime to present to the model (see
-  [Packages](packages.md)). Without it, the runtime presents none.
 - **`init`** is a command, a string that is not blank, that a runtime runs before the agent, and
   which may do the run without it (see [Init](init.md)).
+- **`exclude`** lists what of the tau's directory does not go with a call, beside `.tau/` (see
+  [Directory](directory.md)): patterns, each a path relative to the directory, `/`-separated, or a
+  glob of such paths, as Node.js's `path.matchesGlob` matches them. A pattern that matches a
+  directory leaves out all it holds. None may match what a runtime reads.
 
 Files and the args the schema declares are named as a run's scope has it (see
 [Placeholders](placeholders.md)): a placeholder names each, and one name names one thing.

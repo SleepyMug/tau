@@ -9,7 +9,7 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 |---|---|
 | **tau** | An agent packaged as a directory: Transportable Agent Unit. Written TAU where a model reads it, as in TAU.md and TAU_DEV.md. |
 | **prompt** | `PROMPT.md`, what the agent is asked, with its placeholders. |
-| **metadata** | `tau.json`: the tau's description, files, args, what it exposes, and its init. |
+| **metadata** | `tau.json`: the tau's description, files, args, its init, and what it excludes. |
 | **file** | A file or a directory of the caller's that the tau takes, by its **name**, which `files` in `tau.json` declares, with its mode, its kind and a description, as what the prompt and init need. A file of kind `dir` is a directory: file as Unix means it. Files do not nest. |
 | **mode** | What the agent does with a file: `in`, reads it; `out`, leaves something there; `inout`, changes it in place. |
 | **kind** | What a file is: `file` or `dir`; a file declared without one may be either. |
@@ -19,11 +19,10 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | **scope** | What a run's placeholders name, each by its first name: `self`, its files and its args, one name naming one thing. |
 | **escaped** | A placeholder preceded by `$`: expanding drops one `$` from each run of `$` before a `{`, so `$${name}` is a literal `${name}`, which an agent passes on to a run it makes. |
 | **self** | The tau's own directory, as `${self}` names it. |
-| **package** | Code of the tau's own, in its `node_modules/`, which init and the agent's programs import. |
-| **exposes** | The packages of the tau's own a runtime presents to the model. |
 | **skill** | `skills/<name>/`, with a `SKILL.md`, which the agent can use. |
 | **init** | A command a runtime runs before the agent, which may **skip** it, doing the run itself, **run** it, or **fall back** to it, having failed; its exit codes, `TAU_SKIP`, 0, `TAU_RUN`, 100, and `TAU_FALLBACK`, 101. |
 | **`.tau/`** | For the tools of a tau's author: no runtime reads it; no client carries it. |
+| **exclude** | `exclude` in `tau.json`: patterns of what of the tau's directory does not go with a call, beside `.tau/`. |
 
 ## A run
 
@@ -32,8 +31,7 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | **runtime** | What runs a tau: a client, with its wire adaptor, and a backend, together. |
 | **caller** | Who runs a tau: a person, a program, or another agent. |
 | **agent** | The model the runtime runs on the tau's prompt. |
-| **program** | Code the agent runs with `node`, importing the tau's packages from its program directory. |
-| **program directory** | A directory the runtime gives the agent, other than the tau's own, whose `node_modules/` holds the tau's packages, so that a program anywhere below it imports them. |
+| **program** | Code init or the agent runs with `node`, Node.js 24 or later. |
 | **run context** | A JSON file `TAU_CONTEXT` names for init and the agent's processes: `self`, each file's place, and the args, expanded. |
 | **run** | One run of a tau, for one call. |
 | **call** | What a caller gives a run: a path for each file, extra files, and the args. |
@@ -61,7 +59,7 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | **transport** | What carries the rpc adaptor's calls to the backend, and their answers back: Connect's over a socket, a backend's routes in its process, or another, such as a gateway's. |
 | **backend** | What runs the agent, wherever it is, with the backend SDK. |
 | **backend SDK** | What every backend does alike: **admit** a call, check its files once **placed**, **render** what the agent is given, and **collect** the run's report. |
-| **job** | A run as the client hands it to its adaptor: its envelope, the tau's directory, and the paths of its inputs. |
+| **job** | A run as the client hands it to its adaptor: its envelope, the tau's directory, the patterns of what of it its `exclude` leaves out, and the paths of its inputs. |
 | **delivery** | Where the client asks its adaptor to put a run's outputs: the run's files, and their targets. |
 | **envelope** | A call, checked, without the caller's paths: each file's mode, base name and kind, and the args. |
 | **report** | How a run ended, and the kind of each output it gives back. |
@@ -95,4 +93,5 @@ The names tau gives things, what each means, and the names it no longer uses. [T
 | cancel | Release, which stops a run that has not ended. |
 | `@sleepymug/tau-dev`: `tau check` type-checking a tau, `tau add`, `tau update`, `tau contract` | The `tau` command, which checks a tau without TypeScript. |
 | `@packageDocumentation`, as what describes a package | Its `package.json`'s `description`. |
+| package, the tau's `node_modules/`, `exposes`, `exposed`, `Exposed`; program directory | Nothing in the format: anything in a tau's directory but its prompt, metadata and skills is its author's, which init and the agent may read at `${self}`; what else the agent's programs reach is the runtime's. |
 | `at`, `share`, `role`, `vars`, `paths`; `args` as a positional list | Earlier designs: places were declared, then are the runtime's; `share` and `role` became modes; texts and paths became files and args. |

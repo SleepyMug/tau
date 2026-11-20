@@ -102,6 +102,8 @@ export interface Job {
 	readonly envelope: Envelope;
 	/** The tau's directory, absolute, which always goes with the call. */
 	readonly tau: string;
+	/** The patterns of what of the tau's directory does not go with the call, beside `.tau/`, as its tau.json gives them. */
+	readonly exclude: readonly string[];
 	/** The caller's path of each `in` and `inout` file, absolute, by its name, or, for an `in`, its paths. */
 	readonly inputs: { readonly [name: string]: string | readonly string[] };
 }

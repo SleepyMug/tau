@@ -1,21 +1,44 @@
 import { type Dirent, lstatSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
-/** What a runtime reads of a tau: its packages too, which it makes the agent's programs import (docs/spec/packages.md). */
-const READ = ["PROMPT.md", "tau.json", "skills", "node_modules"];
+/** What a runtime reads of a tau (docs/spec/directory.md). */
+const READ = ["PROMPT.md", "tau.json", "skills"];
 /** More links in a row than this is a loop; Linux gives up at 40 too. */
 const MAX_HOPS = 40;
 
 /**
- * The symlinks of what a runtime reads of the tau at `dir`, its node_modules/ included, that break
- * the spec: each is relative, and leads, through any further symlinks, all relative, to something
- * that exists in the tau. A symlink to a directory is followed, and what it leads to is checked the
- * same way. One problem per symlink.
+ * The symlinks of what a runtime reads of the tau at `dir` that break the spec: each is relative,
+ * and leads, through any further symlinks, all relative, to something that exists in the tau and
+ * goes with a call, which `excluded`, given a path relative to `dir`, says it does not. A symlink to
+ * a directory is followed, and what it leads to is checked the same way. One problem per symlink.
  */
-export function linkProblems(dir: string): string[] {
+export function linkProblems(dir: string, excluded: (file: string) => boolean = () => false): string[] {
 	const root = realpathSync(dir);
 	const parts = READ.map((part) => path.join(root, part));
-	return rootedLinkProblems(root, parts, { inside: "a tau", outside: "the tau" }, (file) => path.relative(root, file) || ".");
+	const relative = (file: string): string => path.relative(root, file).split(path.sep).join("/");
+	return rootedLinkProblems(root, parts, { inside: "a tau", outside: "the tau" }, (file) => path.relative(root, file) || ".", (end) => excluded(relative(end)));
+}
+
+/**
+ * What a runtime reads of the tau at `dir` that `excluded`, given a path relative to `dir`, says
+ * does not go with a call: one problem for each, a directory's naming it alone.
+ */
+export function excludedProblems(dir: string, excluded: (file: string) => boolean): string[] {
+	const problems: string[] = [];
+	const visit = (file: string): void => {
+		const at = path.join(dir, ...file.split("/"));
+		let stats;
+		try {
+			stats = lstatSync(at);
+		} catch {
+			// A part the tau does not have.
+			return;
+		}
+		if (excluded(file)) problems.push(`${file}: a runtime reads it, so \`exclude\` cannot leave it out`);
+		else if (stats.isDirectory()) for (const name of readdirSync(at).sort()) visit(`${file}/${name}`);
+	};
+	for (const part of READ) visit(part);
+	return problems;
 }
 
 /**
@@ -39,6 +62,7 @@ function rootedLinkProblems(
 	starts: readonly string[],
 	scope: { readonly inside: string; readonly outside: string },
 	label: (file: string) => string,
+	left: (end: string) => boolean = () => false,
 ): string[] {
 	const problems: string[] = [];
 	const walked = new Set<string>();
@@ -71,7 +95,8 @@ function rootedLinkProblems(
 			}
 			if (isLink) continue;
 			const end = realpathSync(at);
-			return inside(end, root) ? end : fail(`leads${via} outside ${scope.outside}, to ${end}`);
+			if (!inside(end, root)) return fail(`leads${via} outside ${scope.outside}, to ${end}`);
+			return left(end) ? fail(`leads${via} to ${label(end)}, which \`exclude\` leaves out`) : end;
 		}
 		return fail("is a loop of symlinks");
 	};

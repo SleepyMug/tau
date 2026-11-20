@@ -146,7 +146,7 @@ export function createClient(options: ClientOptions): TauClient {
 				files[file] = { ...given, kind: typeof from === "string" ? kindAt(from) : "dir" };
 				inputs[file] = from;
 			}
-			const id = await adaptor.submit({ envelope: { files, args: resolved.args }, tau: tau.dir, inputs }, signal);
+			const id = await adaptor.submit({ envelope: { files, args: resolved.args }, tau: tau.dir, exclude: tau.exclude, inputs }, signal);
 			const run = `${name}:${id}`;
 			await runs.put(run, { adaptor: name, id, files, targets });
 			return run;

@@ -1,8 +1,7 @@
 # tau
 
 **tau** (Transportable Agent Unit) runs agents as a service. A tau packages an agent as a
-directory: its prompt, the files and args it takes, its skills, and code of its own, which its
-agent's programs build on. The `tau` command, or the client SDK, checks a tau and a call of it where
+directory: its prompt, the files and args it takes, and its skills. The `tau` command, or the client SDK, checks a tau and a call of it where
 the caller is, and hands the run to a **wire adaptor**, which carries it to a **backend** that runs
 the agent with the **backend SDK**, and puts what comes back at the caller's paths.
 
