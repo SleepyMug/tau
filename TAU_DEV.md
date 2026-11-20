@@ -10,7 +10,6 @@ plan-trip/
 ├── init.mts                    run first: writes the itinerary itself if the trip is booked
 ├── skills/visas/SKILL.md       a skill the agent can use
 ├── node_modules/trip-days/     a package of its own, which its programs import
-├── taus/city-guide/            the author's own: here, a TAU it runs
 └── .tau/                       its author's tools', never carried
 ```
 
@@ -27,8 +26,7 @@ plan-trip/
 
 ```
 Plan a trip through ${cities} for ${travelers}, keeping to ${wishes}, from the bookings in ${trip},
-and write the plan, day by day, to ${itinerary}, with trip-days. Then have the TAU at
-${self}/taus/city-guide write a guide to each city into ${trip}, with the tau command.
+and write the plan, day by day, to ${itinerary}, with trip-days.
 ```
 
 `init.mts`:
@@ -57,8 +55,7 @@ console.log(`The trip was booked already; wrote its itinerary, from ${bookings.l
   files, args }`: the TAU's directory, the place of each file, extra files included, by its name,
   and the args, their placeholders expanded.
 - **What else it needs** is its runtime's: a command, a service, the network. The TAU says so in
-  its prompt, and runs only where it is there. So it runs another TAU with the `tau` command, where
-  its runtime gives it, as `tau run ${self}/taus/city-guide --call-json '…' --json` (TAU.md).
+  its prompt, and runs only where it is there.
 - **A skill** is `skills/<name>/SKILL.md`, which starts with YAML frontmatter giving its `name`, its
   directory's, and its `description`, by which the agent tells when to use it.
 - **init**, optional, is a command the runtime runs before the agent, in the agent's working

@@ -74,11 +74,6 @@ A **call** gives a path of the caller's for each file, and the args:
   runtime gives it, such as a command that reaches a service, which takes effect when done, and
   stays if the run fails. What the agent writes anywhere else is scratch. The agent learns of the
   caller only what the call gives it, and cannot ask the caller anything.
-- **Runs nest.** An agent whose runtime gives it the `tau` command runs a TAU with `tau run <dir>
-  --call-json '<call>' --json`, giving paths in its own view, such as its files' places, and it can
-  make several runs at once. A caller can hand an agent a call to make as an arg, its placeholders
-  for the new run escaped: `"$${trip}/ben.pdf"` reaches the agent as `"${trip}/ben.pdf"`, which
-  the new run expands.
 
 A TAU says what its agent needs, never how: where it runs, which model and tools drive it, and what
 else it finds, such as commands or the network, are the runtime's. So are the places, and whether a
